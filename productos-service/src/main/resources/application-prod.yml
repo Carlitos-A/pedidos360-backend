@@ -1,0 +1,34 @@
+# ============================================================
+# PERFIL DE PRODUCCIÓN (AWS) — productos-service
+# Se activa con:  java -jar productos-service.jar --spring.profiles.active=prod
+# Las credenciales llegan por VARIABLES DE ENTORNO (nunca en el repo)
+# ============================================================
+server:
+  port: 8082
+
+spring:
+  application:
+    name: productos-service
+
+  # Base de datos cloud: AWS RDS (MySQL)
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:productosdb}?useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+
+app:
+  security:
+    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+  cors:
+    # URL del frontend en S3 (variable de entorno en el EC2)
+    allowed-origins: ${FRONT_URL:http://localhost:4200}
