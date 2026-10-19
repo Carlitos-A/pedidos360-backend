@@ -15,6 +15,9 @@ target/
 # Logs y temporales
 *.log
 *.tmp
+.env
+.env.*
+!.env.example
 
 # Sistema operativo
 .DS_Store
