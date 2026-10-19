@@ -2,6 +2,7 @@ package com.pedidos360.pedidos.controller;
 
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.repository.PedidoRepository;
+import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,9 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PedidoController {
 
     private final PedidoRepository repository;
+    private final OrderEventPublisher eventPublisher;
 
-    public PedidoController(PedidoRepository repository) {
+    public PedidoController(PedidoRepository repository, OrderEventPublisher eventPublisher) {
         this.repository = repository;
+        this.eventPublisher = eventPublisher;
     }
 
     @GetMapping
@@ -29,6 +32,7 @@ public class PedidoController {
     @PostMapping
     public ResponseEntity<Pedido> crear(@RequestBody Pedido pedido) {
         Pedido guardado = repository.save(pedido);
+        eventPublisher.publicarPedidoCreado(guardado);
         return ResponseEntity.status(HttpStatus.CREATED).body(guardado);
     }
 }
