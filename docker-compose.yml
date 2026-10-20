@@ -1,0 +1,59 @@
+services:
+  rabbit1:
+    image: rabbitmq:4.1-management
+    hostname: rabbit1
+    container_name: pedidos360-rabbit1
+    restart: unless-stopped
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbit1
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Set RABBITMQ_ERLANG_COOKIE in .env}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_DEFAULT_VHOST: /pedidos360
+    ports:
+      - "${RABBITMQ_BIND_ADDRESS:-127.0.0.1}:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbit1-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    networks: [pedidos360-messaging]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  rabbit2:
+    image: rabbitmq:4.1-management
+    hostname: rabbit2
+    container_name: pedidos360-rabbit2
+    restart: unless-stopped
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbit2
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Set RABBITMQ_ERLANG_COOKIE in .env}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_DEFAULT_VHOST: /pedidos360
+    ports:
+      - "127.0.0.1:5673:5672"
+      - "127.0.0.1:15673:15672"
+    volumes:
+      - rabbit2-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    networks: [pedidos360-messaging]
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+networks:
+  pedidos360-messaging:
+    name: pedidos360-messaging
+
+volumes:
+  rabbit1-data:
+  rabbit2-data:
