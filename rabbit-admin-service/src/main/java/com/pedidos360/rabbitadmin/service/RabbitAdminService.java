@@ -1,6 +1,7 @@
 package com.pedidos360.rabbitadmin.service;
 
 import org.springframework.amqp.core.DirectExchange;
+import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Exchange;
 import org.springframework.amqp.core.FanoutExchange;
 import org.springframework.amqp.core.Queue;
@@ -63,6 +64,28 @@ public class RabbitAdminService {
         rabbitAdmin.deleteExchange(name);
     }
 
+    public BindingInfo crearBinding(String queueName, String exchangeName, String routingKey) {
+        Binding binding = bindingDinamico(queueName, exchangeName, routingKey);
+        rabbitAdmin.declareBinding(binding);
+        return new BindingInfo(queueName, exchangeName, routingKey);
+    }
+
+    public void eliminarBinding(String queueName, String exchangeName, String routingKey) {
+        rabbitAdmin.removeBinding(bindingDinamico(queueName, exchangeName, routingKey));
+    }
+
+    private Binding bindingDinamico(String queueName, String exchangeName, String routingKey) {
+        validarNombreDinamico(queueName, "colas");
+        validarNombreDinamico(exchangeName, "exchanges");
+        if (routingKey == null || routingKey.length() > 255
+                || routingKey.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("routingKey es obligatorio y debe tener hasta 255 caracteres sin controles");
+        }
+        // La clave vacía es válida para un exchange fanout.
+        return new Binding(queueName, Binding.DestinationType.QUEUE,
+                exchangeName, routingKey, null);
+    }
+
     private void validarNombre(String name) {
         if (name == null || name.isBlank() || name.length() > 180
                 || !name.matches("[a-zA-Z0-9][a-zA-Z0-9._-]*")) {
@@ -79,4 +102,5 @@ public class RabbitAdminService {
 
     public record QueueInfo(String name, boolean durable, java.util.Map<String, Object> arguments) { }
     public record ExchangeInfo(String name, String type, boolean durable) { }
+    public record BindingInfo(String queue, String exchange, String routingKey) { }
 }

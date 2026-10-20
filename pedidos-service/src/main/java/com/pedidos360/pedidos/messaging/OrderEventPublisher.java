@@ -10,9 +10,12 @@ import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class OrderEventPublisher {
+    private static final Logger log = LoggerFactory.getLogger(OrderEventPublisher.class);
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
     private final String directExchange;
@@ -42,9 +45,16 @@ public class OrderEventPublisher {
         OrderCreatedEvent event = new OrderCreatedEvent(pedido.getId(), pedido.getCliente(),
                 pedido.getDetalle(), pedido.getTotal(), pedido.getEstado(), pedido.getFecha());
         Message message = toMessage(event);
-        rabbitTemplate.send(directExchange, orderCreatedKey, message);
-        rabbitTemplate.send(topicExchange, ticketCreatedKey, message);
-        rabbitTemplate.send(topicExchange, auditCreatedKey, message);
+        enviar(event, message, directExchange, orderCreatedKey, "notificacion");
+        enviar(event, message, topicExchange, ticketCreatedKey, "ticket");
+        enviar(event, message, topicExchange, auditCreatedKey, "auditoria");
+    }
+
+    private void enviar(OrderCreatedEvent event, Message message, String exchange,
+                        String routingKey, String tarea) {
+        rabbitTemplate.send(exchange, routingKey, message);
+        log.info("[RabbitMQ] PUBLICACION pedido={} messageId={} tarea={} exchange={} routingKey={}",
+                event.orderId(), message.getMessageProperties().getMessageId(), tarea, exchange, routingKey);
     }
 
     private Message toMessage(OrderCreatedEvent event) {

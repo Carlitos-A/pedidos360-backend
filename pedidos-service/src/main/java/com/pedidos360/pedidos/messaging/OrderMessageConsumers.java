@@ -5,6 +5,8 @@ import java.io.IOException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
@@ -12,6 +14,7 @@ import com.rabbitmq.client.Channel;
 /** Cada caso funcional tiene su listener y confirma o rechaza explícitamente el mensaje. */
 @Component
 public class OrderMessageConsumers {
+    private static final Logger log = LoggerFactory.getLogger(OrderMessageConsumers.class);
     private final ObjectMapper objectMapper;
 
     public OrderMessageConsumers(ObjectMapper objectMapper) { this.objectMapper = objectMapper; }
@@ -38,12 +41,13 @@ public class OrderMessageConsumers {
             if (event.orderId() == null || event.customer() == null || event.customer().isBlank()) {
                 throw new IllegalArgumentException("El evento debe incluir orderId y customer");
             }
-            System.out.printf("[RabbitMQ] %s procesado para pedido %d (%s)%n",
-                    destino, event.orderId(), event.customer());
             channel.basicAck(deliveryTag, false);
+            log.info("[RabbitMQ] ACK tarea={} pedido={} messageId={} cliente={}",
+                    destino, event.orderId(), message.getMessageProperties().getMessageId(), event.customer());
         } catch (Exception exception) {
-            System.err.printf("[RabbitMQ] Falló %s; mensaje enviado a DLQ: %s%n", destino, exception.getMessage());
             channel.basicNack(deliveryTag, false, false);
+            log.warn("[RabbitMQ] NACK tarea={} messageId={} requeue=false; RabbitMQ enruta a DLQ. Causa: {}",
+                    destino, message.getMessageProperties().getMessageId(), exception.getMessage());
         }
     }
 }

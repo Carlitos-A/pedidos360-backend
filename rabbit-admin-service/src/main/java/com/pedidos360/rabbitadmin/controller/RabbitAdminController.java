@@ -2,6 +2,7 @@ package com.pedidos360.rabbitadmin.controller;
 
 import com.pedidos360.rabbitadmin.service.RabbitAdminService;
 import com.pedidos360.rabbitadmin.service.RabbitAdminService.ExchangeInfo;
+import com.pedidos360.rabbitadmin.service.RabbitAdminService.BindingInfo;
 import com.pedidos360.rabbitadmin.service.RabbitAdminService.QueueInfo;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -55,6 +56,20 @@ public class RabbitAdminController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/bindings")
+    public ResponseEntity<BindingInfo> crearBinding(@RequestBody BindingRequest request) {
+        if (request == null) throw new IllegalArgumentException("El cuerpo de la solicitud es obligatorio");
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(service.crearBinding(request.queue(), request.exchange(), request.routingKey()));
+    }
+
+    @DeleteMapping("/bindings")
+    public ResponseEntity<Void> eliminarBinding(@RequestBody BindingRequest request) {
+        if (request == null) throw new IllegalArgumentException("El cuerpo de la solicitud es obligatorio");
+        service.eliminarBinding(request.queue(), request.exchange(), request.routingKey());
+        return ResponseEntity.noContent().build();
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> badRequest(IllegalArgumentException exception) {
         return ResponseEntity.badRequest().body(Map.of("error", exception.getMessage()));
@@ -63,4 +78,5 @@ public class RabbitAdminController {
     public record CreateQueueRequest(String name, Boolean durable,
                                      String deadLetterExchange, String deadLetterRoutingKey) { }
     public record CreateExchangeRequest(String name, String type, Boolean durable) { }
+    public record BindingRequest(String queue, String exchange, String routingKey) { }
 }
