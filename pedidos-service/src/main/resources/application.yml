@@ -25,7 +25,38 @@ spring:
         jwt:
           issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:pedidos360}
+    password: ${RABBITMQ_PASSWORD:pedidos360-local}
+    virtual-host: ${RABBITMQ_VHOST:/pedidos360}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: false
+        concurrency: 1
+        max-concurrency: 3
+
 # Audience esperada: el Application ID URI de la app "Pedidos360-API"
 app:
   security:
     audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+
+pedidos360:
+  messaging:
+    exchanges:
+      orders-direct: pedidos360.orders.direct
+      orders-topic: pedidos360.orders.topic
+      dead-letter: pedidos360.dead-letter
+    queues:
+      notification: pedidos360.orders.notification
+      notification-dlq: pedidos360.orders.notification.dlq
+      ticket: pedidos360.orders.ticket
+      ticket-dlq: pedidos360.orders.ticket.dlq
+      audit: pedidos360.orders.audit
+      audit-dlq: pedidos360.orders.audit.dlq
+    routing-keys:
+      order-created: orders.created
+      ticket-created: orders.created.ticket
+      audit-created: orders.created.audit
