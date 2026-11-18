@@ -4,6 +4,29 @@ Microservicios Spring Boot del sistema Pedidos360 (EP1 · DSY1107).
 
 ## Microservicios
 
+### Contrato `/api/*` para Angular
+
+`pedidos-service` expone `GET/POST /api/orders`, `GET/PUT /api/orders/{id}` y
+`PATCH /api/orders/{id}/status`. La lista acepta `status`, `q`, `from`, `to`,
+`page` (desde cero) y `pageSize` (1 a 100), y responde `{items,total,page,pageSize}`.
+El rol Cliente recibe solo pedidos cuyos `customerId` y `customerTenantId`
+coinciden con `oid` y `tid` del access token. Los registros históricos sin
+propietario solo son visibles para Admin. `POST /pedidos` ya no se usa, pues
+permitía crear registros sin propietario ni validación; `GET /pedidos` queda
+temporalmente disponible solo para Admin.
+
+`productos-service` expone `GET/POST /api/products`, `PUT /api/products/{id}`
+y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. Las escrituras
+requieren Admin. Ambos servicios admiten `PATCH` en CORS.
+
+Antes de desplegar sobre MySQL existente, preparar migración de esquema para
+propietario, `version`, ítems, historial y stock. Las filas existentes no deben
+recibir un propietario inferido por nombre; asignarlo solo tras verificarlo.
+Los precios e ítems que llegan del navegador todavía necesitan cotejo con el
+catálogo y reglas de reserva de stock antes de tratar el total como importe
+autoritativo. El API Gateway aún debe enrutar `/api/orders/*` y
+`/api/products/*` a los puertos internos respectivos.
+
 | Servicio | Puerto | Endpoints |
 |---|---|---|
 | `pedidos-service` | 8081 | `GET /pedidos`, `POST /pedidos` |
