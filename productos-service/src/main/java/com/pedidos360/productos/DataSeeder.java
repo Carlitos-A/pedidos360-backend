@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
  * Carga datos de ejemplo al arrancar.
  */
 @Configuration
+@org.springframework.context.annotation.Profile("!prod")
 public class DataSeeder {
 
     @Bean

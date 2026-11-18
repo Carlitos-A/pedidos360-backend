@@ -4,6 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Version;
 
 @Entity
 public class Producto {
@@ -15,6 +16,9 @@ public class Producto {
     private String nombre;
     private String categoria;
     private Double precio;
+    private Integer stock;
+    @Version
+    private Long version;
 
     public Producto() {
     }
@@ -56,4 +60,6 @@ public class Producto {
     public void setPrecio(Double precio) {
         this.precio = precio;
     }
+    public Integer getStock() { return stock; }
+    public void setStock(Integer stock) { this.stock = stock; }
 }

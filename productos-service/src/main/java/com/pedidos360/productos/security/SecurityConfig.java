@@ -48,7 +48,15 @@ public class SecurityConfig {
                     .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
                 .requestMatchers(HttpMethod.POST, "/productos/**")
                     .hasAuthority("APPROLE_Admin")
-                .anyRequest().authenticated())
+                .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**")
+                    .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
+                .requestMatchers(HttpMethod.POST, "/api/products", "/api/products/**")
+                    .hasAuthority("APPROLE_Admin")
+                .requestMatchers(HttpMethod.PUT, "/api/products/**")
+                    .hasAuthority("APPROLE_Admin")
+                .requestMatchers(HttpMethod.PATCH, "/api/products/**")
+                    .hasAuthority("APPROLE_Admin")
+                .anyRequest().denyAll())
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt
                     .decoder(jwtDecoder())
@@ -81,7 +89,7 @@ public class SecurityConfig {
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
