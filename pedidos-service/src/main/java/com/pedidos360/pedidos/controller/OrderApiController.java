@@ -5,6 +5,8 @@ import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
 import com.pedidos360.pedidos.repository.PedidoRepository;
+import com.pedidos360.pedidos.repository.AuditEventRepository;
+import com.pedidos360.pedidos.model.AuditEvent;
 import jakarta.transaction.Transactional;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -24,8 +26,9 @@ public class OrderApiController {
     private static final ZoneId SANTIAGO = ZoneId.of("America/Santiago");
     private final PedidoRepository repository;
     private final OrderEventPublisher publisher;
-    public OrderApiController(PedidoRepository repository, OrderEventPublisher publisher) {
-        this.repository = repository; this.publisher = publisher;
+    private final AuditEventRepository audit;
+    public OrderApiController(PedidoRepository repository, OrderEventPublisher publisher, AuditEventRepository audit) {
+        this.repository = repository; this.publisher = publisher; this.audit = audit;
     }
 
     public record OrderInput(String customerName, String customerId, String customerTenantId,
@@ -78,6 +81,7 @@ public class OrderApiController {
         p.setFecha(java.time.LocalDateTime.now(SANTIAGO));
         p.getHistory().add(event("CREATED", jwt));
         repository.saveAndFlush(p);
+        audit.save(new AuditEvent("order-created-" + p.getId(), "ORDER_CREATED", "Pedido " + p.getId() + " creado", actorEmail(jwt), OffsetDateTime.now()));
         publisher.publicarPedidoCreado(p);
         return view(p);
     }
@@ -109,6 +113,9 @@ public class OrderApiController {
         p.setUpdatedAt(OffsetDateTime.now());
         p.getHistory().add(event(next, jwt));
         repository.saveAndFlush(p);
+        audit.save(new AuditEvent("order-status-" + p.getId() + "-" + p.getVersion(),
+            "CANCELLED".equals(next) ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED",
+            "Pedido " + p.getId() + " pasó a " + next, actorEmail(jwt), OffsetDateTime.now()));
         return view(p);
     }
 
@@ -145,6 +152,11 @@ public class OrderApiController {
     }
     private PedidoStatusEvent event(String status, Jwt jwt) {
         return new PedidoStatusEvent(status, OffsetDateTime.now(), jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name"), "Admin");
+    }
+    private String actorEmail(Jwt jwt) {
+        String email = jwt.getClaimAsString("preferred_username");
+        if (email == null) email = jwt.getClaimAsString("email");
+        return email;
     }
     private OrderView view(Pedido p) {
         String date = p.getFecha() == null ? "" : p.getFecha().atZone(SANTIAGO).toOffsetDateTime().toString();

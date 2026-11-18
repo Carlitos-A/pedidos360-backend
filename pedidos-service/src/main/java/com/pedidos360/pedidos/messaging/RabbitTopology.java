@@ -72,6 +72,10 @@ public class RabbitTopology {
             @Qualifier("ordersTopicExchange") TopicExchange ordersTopicExchange) {
         return BindingBuilder.bind(auditQueue).to(ordersTopicExchange).with(auditCreatedKey);
     }
+    @Bean public Binding productAuditBinding(@Qualifier("auditQueue") Queue auditQueue,
+            @Qualifier("ordersTopicExchange") TopicExchange ordersTopicExchange) {
+        return BindingBuilder.bind(auditQueue).to(ordersTopicExchange).with("products.updated.audit");
+    }
     @Bean public Binding notificationDlqBinding(@Qualifier("notificationDlq") Queue notificationDlq,
             @Qualifier("deadLetterExchange") DirectExchange deadLetterExchange) {
         return BindingBuilder.bind(notificationDlq).to(deadLetterExchange).with(notificationDlqName);

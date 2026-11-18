@@ -7,6 +7,13 @@ server:
   port: 8082
 
 spring:
+  rabbitmq:
+    connection-timeout: 2s
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: ${RABBITMQ_VHOST:/pedidos360}
   application:
     name: productos-service
 

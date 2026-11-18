@@ -4,6 +4,7 @@ import com.pedidos360.pedidos.controller.OrderApiController;
 import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.repository.PedidoRepository;
+import com.pedidos360.pedidos.repository.AuditEventRepository;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,7 @@ import static org.mockito.Mockito.*;
 
 class OrderApiControllerTest {
     private final PedidoRepository repository = mock(PedidoRepository.class);
-    private final OrderApiController api = new OrderApiController(repository, mock(OrderEventPublisher.class));
+    private final OrderApiController api = new OrderApiController(repository, mock(OrderEventPublisher.class), mock(AuditEventRepository.class));
     private final Jwt cliente = Jwt.withTokenValue("token").header("alg", "none")
         .claim("roles", List.of("Cliente")).claim("oid", "owner-1").claim("tid", "tenant-1").build();
 
