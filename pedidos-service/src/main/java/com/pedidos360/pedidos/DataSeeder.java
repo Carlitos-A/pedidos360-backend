@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
  * devuelva contenido sin tener que insertar nada a mano.
  */
 @Configuration
+@org.springframework.context.annotation.Profile("!prod")
 public class DataSeeder {
 
     @Bean

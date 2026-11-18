@@ -5,8 +5,20 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OrderColumn;
+import java.util.ArrayList;
+import java.util.List;
+import jakarta.persistence.Version;
+import jakarta.persistence.Table;
+import jakarta.persistence.Index;
 
 @Entity
+@Table(indexes = @Index(name = "idx_pedido_owner", columnList = "customer_id,customer_tenant_id"))
 public class Pedido {
 
     @Id
@@ -18,6 +30,22 @@ public class Pedido {
     private Double total;
     private String estado;
     private LocalDateTime fecha;
+
+    @Column(name = "customer_id")
+    private String customerId;
+    @Column(name = "customer_tenant_id")
+    private String customerTenantId;
+    private OffsetDateTime updatedAt;
+    @Version
+    private Long version;
+    @ElementCollection
+    @CollectionTable(name = "pedido_items", joinColumns = @JoinColumn(name = "pedido_id"))
+    @OrderColumn(name = "position")
+    private List<PedidoItem> items = new ArrayList<>();
+    @ElementCollection
+    @CollectionTable(name = "pedido_history", joinColumns = @JoinColumn(name = "pedido_id"))
+    @OrderColumn(name = "position")
+    private List<PedidoStatusEvent> history = new ArrayList<>();
 
     public Pedido() {
     }
@@ -77,4 +105,16 @@ public class Pedido {
     public void setFecha(LocalDateTime fecha) {
         this.fecha = fecha;
     }
+
+    public String getCustomerId() { return customerId; }
+    public void setCustomerId(String customerId) { this.customerId = customerId; }
+    public String getCustomerTenantId() { return customerTenantId; }
+    public void setCustomerTenantId(String customerTenantId) { this.customerTenantId = customerTenantId; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public Long getVersion() { return version; }
+    public List<PedidoItem> getItems() { return items; }
+    public void setItems(List<PedidoItem> items) { this.items = items; }
+    public List<PedidoStatusEvent> getHistory() { return history; }
+    public void setHistory(List<PedidoStatusEvent> history) { this.history = history; }
 }
