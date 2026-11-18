@@ -45,8 +45,6 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/productos/**")
-                    .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
-                .requestMatchers(HttpMethod.POST, "/productos/**")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**")
                     .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")

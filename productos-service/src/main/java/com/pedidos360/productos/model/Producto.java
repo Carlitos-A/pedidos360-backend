@@ -5,8 +5,12 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Version;
+import jakarta.persistence.Column;
+import jakarta.persistence.Index;
+import jakarta.persistence.Table;
 
 @Entity
+@Table(indexes = @Index(name = "idx_producto_owner", columnList = "customer_id,customer_tenant_id"))
 public class Producto {
 
     @Id
@@ -17,6 +21,10 @@ public class Producto {
     private String categoria;
     private Double precio;
     private Integer stock;
+    @Column(name = "customer_id")
+    private String customerId;
+    @Column(name = "customer_tenant_id")
+    private String customerTenantId;
     @Version
     private Long version;
 
@@ -62,4 +70,8 @@ public class Producto {
     }
     public Integer getStock() { return stock; }
     public void setStock(Integer stock) { this.stock = stock; }
+    public String getCustomerId() { return customerId; }
+    public void setCustomerId(String customerId) { this.customerId = customerId; }
+    public String getCustomerTenantId() { return customerTenantId; }
+    public void setCustomerTenantId(String customerTenantId) { this.customerTenantId = customerTenantId; }
 }

@@ -37,8 +37,13 @@ permitía crear registros sin propietario ni validación; `GET /pedidos` queda
 temporalmente disponible solo para Admin.
 
 `productos-service` expone `GET/POST /api/products`, `PUT /api/products/{id}`
-y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. Las escrituras
-requieren Admin. Ambos servicios admiten `PATCH` en CORS.
+y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. Cada producto
+guarda `customerId` y `customerTenantId`; Admin asigna ambos al crear o editar.
+GET `/api/products` devuelve todos para Admin y solo los que coinciden con
+`oid` y `tid` del access token para Cliente. Los productos antiguos sin dueño
+quedan visibles solo para Admin hasta una asignación verificada. El GET legado
+`/productos` requiere Admin y el POST legado se deshabilitó para impedir
+productos nuevos sin dueño. Ambos servicios admiten `PATCH` en CORS.
 
 Antes de desplegar sobre MySQL existente, preparar migración de esquema para
 propietario, `version`, ítems, historial y stock. Las filas existentes no deben
@@ -50,8 +55,8 @@ autoritativo. El API Gateway aún debe enrutar `/api/orders/*` y
 
 | Servicio | Puerto | Endpoints |
 |---|---|---|
-| `pedidos-service` | 8081 | `GET /pedidos`, `POST /pedidos` |
-| `productos-service` | 8082 | `GET /productos`, `POST /productos` |
+| `pedidos-service` | 8081 | `/api/orders`, `/api/reports/*`, `/api/audit/events`, `/api/health` |
+| `productos-service` | 8082 | `/api/products`, `/api/products/{id}/stock` |
 | `rabbit-admin-service` | 8083 | `GET /admin/health`, gestión REST de colas, exchanges y bindings |
 
 ## Requisitos
