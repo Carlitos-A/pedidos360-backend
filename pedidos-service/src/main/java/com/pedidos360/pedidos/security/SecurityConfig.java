@@ -55,6 +55,8 @@ public class SecurityConfig {
                     .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
                 .requestMatchers(HttpMethod.GET, "/api/reports/**")
                     .hasAuthority("APPROLE_Admin")
+                .requestMatchers(HttpMethod.GET, "/api/customers")
+                    .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/audit/events")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/health")

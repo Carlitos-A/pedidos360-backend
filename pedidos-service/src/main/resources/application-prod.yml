@@ -35,6 +35,12 @@ spring:
     virtual-host: ${RABBITMQ_VHOST:/pedidos360}
 
 app:
+  identity:
+    tenant-id: ${ENTRA_TENANT_ID}
+    graph-client-id: ${GRAPH_CLIENT_ID:}
+    graph-client-secret: ${GRAPH_CLIENT_SECRET:}
+    api-service-principal-id: ${API_SERVICE_PRINCIPAL_ID:}
+    customer-role-id: ${CUSTOMER_ROLE_ID:}
   security:
     audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
   cors:

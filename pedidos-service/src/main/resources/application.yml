@@ -41,6 +41,12 @@ spring:
 
 # Audience esperada: el Application ID URI de la app "Pedidos360-API"
 app:
+  identity:
+    tenant-id: ${ENTRA_TENANT_ID:bb5324af-c266-41ed-b36c-a971641c7af2}
+    graph-client-id: ${GRAPH_CLIENT_ID:}
+    graph-client-secret: ${GRAPH_CLIENT_SECRET:}
+    api-service-principal-id: ${API_SERVICE_PRINCIPAL_ID:}
+    customer-role-id: ${CUSTOMER_ROLE_ID:}
   security:
     audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
 

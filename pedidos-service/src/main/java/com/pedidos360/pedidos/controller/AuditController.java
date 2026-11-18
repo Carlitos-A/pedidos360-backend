@@ -26,7 +26,7 @@ public class AuditController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         String email = user == null ? "" : user.strip().toLowerCase();
         String kind = type == null ? "" : type.strip();
-        if (!kind.isEmpty() && !List.of("ORDER_CREATED", "ORDER_STATUS_CHANGED", "ORDER_CANCELLED", "PRODUCT_UPDATED", "USER_LOGIN").contains(kind))
+        if (!kind.isEmpty() && !List.of("ORDER_CREATED", "ORDER_STATUS_CHANGED", "ORDER_CANCELLED", "ORDER_OWNER_CHANGED", "PRODUCT_UPDATED", "USER_LOGIN").contains(kind))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo inválido");
         List<AuditEvent> matches = repository.findAll().stream()
             .filter(e -> email.isEmpty() || e.getActorEmail() != null && e.getActorEmail().toLowerCase().contains(email))

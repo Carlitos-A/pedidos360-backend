@@ -14,6 +14,15 @@ import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import com.pedidos360.pedidos.identity.CustomerDirectory;
+import com.pedidos360.pedidos.model.VerifiedOwnerMapping;
+import com.pedidos360.pedidos.repository.VerifiedOwnerMappingRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,13 +36,19 @@ public class OrderApiController {
     private final PedidoRepository repository;
     private final OrderEventPublisher publisher;
     private final AuditEventRepository audit;
-    public OrderApiController(PedidoRepository repository, OrderEventPublisher publisher, AuditEventRepository audit) {
-        this.repository = repository; this.publisher = publisher; this.audit = audit;
+    private final CustomerDirectory directory;
+    private final VerifiedOwnerMappingRepository mappings;
+    public OrderApiController(PedidoRepository repository, OrderEventPublisher publisher, AuditEventRepository audit,
+                              CustomerDirectory directory, VerifiedOwnerMappingRepository mappings) {
+        this.repository = repository; this.publisher = publisher; this.audit = audit; this.directory = directory;
+        this.mappings = mappings;
     }
 
     public record OrderInput(String customerName, String customerId, String customerTenantId,
                              String detail, Long total, List<PedidoItem> items) {}
     public record StatusInput(String status) {}
+    public record OwnerInput(String customerId, String customerTenantId) {}
+    public record LegacyOwnerInput(Long orderId, String customerId, String customerTenantId) {}
     public record Page<T>(List<T> items, long total, int page, int pageSize) {}
     public record OrderView(String id, String customerName, String customerId, String customerTenantId,
                             String detail, Double total, String status, String createdAt,
@@ -48,18 +63,36 @@ public class OrderApiController {
         if (page < 0 || pageSize < 1 || pageSize > 100 || (from != null && to != null && from.isAfter(to))) bad();
         String wanted = status == null || status.isBlank() ? null : normalized(status);
         String search = q == null ? "" : q.strip().toLowerCase();
-        List<Pedido> matches = repository.findAll().stream()
-            .filter(p -> visible(p, jwt))
-            .filter(p -> wanted == null || wanted.equals(normalized(p.getEstado())))
-            .filter(p -> search.isEmpty() || (p.getId() + " " + p.getCliente() + " " + p.getDetalle()).toLowerCase().contains(search))
-            .filter(p -> from == null || !p.getFecha().toLocalDate().isBefore(from))
-            .filter(p -> to == null || !p.getFecha().toLocalDate().isAfter(to))
-            .sorted(Comparator.comparing(Pedido::getFecha, Comparator.nullsLast(Comparator.reverseOrder()))
-                    .thenComparing(Pedido::getId, Comparator.reverseOrder())).toList();
-        long start = (long) page * pageSize;
-        List<OrderView> items = start >= matches.size() ? List.of() :
-            matches.subList((int) start, (int) Math.min(matches.size(), start + pageSize)).stream().map(this::view).toList();
-        return new Page<>(items, matches.size(), page, pageSize);
+        boolean admin = jwt.getClaimAsStringList("roles") != null && jwt.getClaimAsStringList("roles").contains("Admin");
+        String oid = jwt.getClaimAsString("oid"), tid = jwt.getClaimAsString("tid");
+        if (!admin && (blank(oid) || blank(tid))) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        Specification<Pedido> criteria = (root, query, cb) -> {
+            List<Predicate> conditions = new ArrayList<>();
+            if (!admin) {
+                conditions.add(cb.equal(root.get("customerId"), oid));
+                conditions.add(cb.equal(root.get("customerTenantId"), tid));
+            }
+            if (wanted != null) {
+                List<String> equivalents = switch (wanted) {
+                    case "CREATED" -> List.of("CREATED", "PENDIENTE");
+                    case "IN_PROGRESS" -> List.of("IN_PROGRESS", "EN_PREPARACION");
+                    case "COMPLETED" -> List.of("COMPLETED", "ENTREGADO");
+                    default -> List.of(wanted);
+                };
+                conditions.add(root.get("estado").in(equivalents));
+            }
+            if (!search.isEmpty()) {
+                String pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+                conditions.add(cb.or(cb.like(cb.lower(root.get("cliente")), pattern, '\\'),
+                    cb.like(cb.lower(root.get("detalle")), pattern, '\\'),
+                    cb.like(root.get("id").as(String.class), pattern, '\\')));
+            }
+            if (from != null) conditions.add(cb.greaterThanOrEqualTo(root.get("fecha"), from.atStartOfDay()));
+            if (to != null) conditions.add(cb.lessThan(root.get("fecha"), to.plusDays(1).atStartOfDay()));
+            return cb.and(conditions.toArray(Predicate[]::new));
+        };
+        var result = repository.findAll(criteria, PageRequest.of(page, pageSize, Sort.by(Sort.Order.desc("fecha"), Sort.Order.desc("id"))));
+        return new Page<>(result.getContent().stream().map(this::view).toList(), result.getTotalElements(), page, pageSize);
     }
 
     @GetMapping("/{id}")
@@ -75,8 +108,11 @@ public class OrderApiController {
     @Transactional
     public OrderView create(@RequestBody OrderInput input, @AuthenticationPrincipal Jwt jwt) {
         validate(input);
+        var owner = directory.resolve(input.customerId(), input.customerTenantId());
         Pedido p = new Pedido();
         apply(p, input);
+        p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId());
+        p.setCliente(owner.name());
         p.setEstado("CREATED");
         p.setFecha(java.time.LocalDateTime.now(SANTIAGO));
         p.getHistory().add(event("CREATED", jwt));
@@ -91,10 +127,48 @@ public class OrderApiController {
     public OrderView update(@PathVariable Long id, @RequestBody OrderInput input) {
         validate(input);
         Pedido p = find(id);
+        if (!java.util.Objects.equals(p.getCustomerId(), input.customerId()) ||
+            !java.util.Objects.equals(p.getCustomerTenantId(), input.customerTenantId()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Usa la reasignación administrativa para cambiar propietario");
         apply(p, input);
         p.setUpdatedAt(OffsetDateTime.now());
         repository.saveAndFlush(p);
         return view(p);
+    }
+
+    @PatchMapping("/{id}/owner")
+    @Transactional
+    public OrderView reassign(@PathVariable Long id, @RequestBody OwnerInput input, @AuthenticationPrincipal Jwt jwt) {
+        if (input == null) bad();
+        var owner = directory.resolve(input.customerId(), input.customerTenantId());
+        Pedido p = find(id);
+        p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId()); p.setCliente(owner.name());
+        p.setUpdatedAt(OffsetDateTime.now());
+        repository.saveAndFlush(p);
+        audit.save(new AuditEvent("order-owner-" + p.getId() + "-" + p.getVersion(), "ORDER_OWNER_CHANGED",
+            "Propietario del pedido " + p.getId() + " reasignado", actorEmail(jwt), OffsetDateTime.now()));
+        return view(p);
+    }
+
+    @PostMapping("/ownership-migration")
+    @Transactional
+    public Map<String, Integer> migrateOwners(@RequestBody List<LegacyOwnerInput> input, @AuthenticationPrincipal Jwt jwt) {
+        if (input == null || input.isEmpty() || input.size() > 100) bad();
+        if (input.stream().anyMatch(x -> x == null || x.orderId() == null) ||
+            input.stream().map(LegacyOwnerInput::orderId).distinct().count() != input.size()) bad();
+        for (LegacyOwnerInput item : input) {
+            Pedido p = find(item.orderId());
+            if (p.getCustomerId() != null || p.getCustomerTenantId() != null || mappings.existsById(item.orderId()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Pedido ya asignado: " + item.orderId());
+            var owner = directory.resolve(item.customerId(), item.customerTenantId());
+            p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId()); p.setCliente(owner.name());
+            p.setUpdatedAt(OffsetDateTime.now());
+            repository.saveAndFlush(p);
+            mappings.save(new VerifiedOwnerMapping(p.getId(), owner.id(), owner.tenantId(), actorEmail(jwt), OffsetDateTime.now()));
+            audit.save(new AuditEvent("order-owner-migrated-" + p.getId(), "ORDER_OWNER_CHANGED",
+                "Propietario histórico del pedido " + p.getId() + " verificado", actorEmail(jwt), OffsetDateTime.now()));
+        }
+        return Map.of("migrated", input.size());
     }
 
     @PatchMapping("/{id}/status")
@@ -127,8 +201,7 @@ public class OrderApiController {
             && p.getCustomerTenantId().equals(jwt.getClaimAsString("tid"));
     }
     private void apply(Pedido p, OrderInput input) {
-        p.setCliente(input.customerName().strip()); p.setCustomerId(input.customerId().strip());
-        p.setCustomerTenantId(input.customerTenantId().strip()); p.setDetalle(input.detail().strip());
+        p.setDetalle(input.detail().strip());
         p.setTotal(input.total().doubleValue());
         p.getItems().clear(); if (input.items() != null) p.getItems().addAll(input.items());
     }
