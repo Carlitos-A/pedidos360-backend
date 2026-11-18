@@ -36,6 +36,30 @@ propietario solo son visibles para Admin. `POST /pedidos` ya no se usa, pues
 permitía crear registros sin propietario ni validación; `GET /pedidos` queda
 temporalmente disponible solo para Admin.
 
+La lista de Cliente aplica propietario, búsqueda, estado y fechas en SQL antes
+de paginar y contar. Admin selecciona el destinatario desde
+`GET /api/customers?q=...`; `POST /api/orders` vuelve a comprobar en Microsoft
+Graph que la cuenta existe, está habilitada y tiene asignado directamente el
+rol Cliente de esta API. PUT no puede cambiar propietario. Para cambiarlo,
+Admin usa `PATCH /api/orders/{id}/owner` con `customerId` y
+`customerTenantId`; la operación se audita. Debes enrutar también
+`/api/customers` hacia `pedidos-service:8081` en API Gateway.
+
+Para activar el directorio configura `ENTRA_TENANT_ID`, `GRAPH_CLIENT_ID`,
+`GRAPH_CLIENT_SECRET`, `API_SERVICE_PRINCIPAL_ID` y `CUSTOMER_ROLE_ID` en la
+instancia. La aplicación confidencial de Graph necesita permiso de aplicación
+`Directory.Read.All` con consentimiento de administrador para leer usuarios y
+asignaciones directas de roles. Si falta configuración o Graph falla, la
+búsqueda y las asignaciones responden 503. No guardes el secreto en Git.
+
+La migración histórica es explícita: Admin envía a
+`POST /api/orders/ownership-migration` una lista de hasta 100 objetos
+`{orderId,customerId,customerTenantId}` construida con una correspondencia
+comprobada. El servidor vuelve a verificar cada cuenta en Graph, exige que
+el pedido aún no tenga propietario, guarda la correspondencia en
+`verified_owner_mapping` con actor y fecha, y registra auditoría. Un error
+revierte el lote completo. Nunca se asigna por coincidencia del nombre.
+
 `productos-service` expone `GET/POST /api/products`, `PUT /api/products/{id}`
 y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. Cada producto
 guarda `customerId` y `customerTenantId`; Admin asigna ambos al crear o editar.
