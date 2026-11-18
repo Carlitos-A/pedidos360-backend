@@ -6,6 +6,27 @@ Microservicios Spring Boot del sistema Pedidos360 (EP1 · DSY1107).
 
 ### Contrato `/api/*` para Angular
 
+La vista Admin de reportes y auditoría y el panel de estado ya existen en el
+frontend. Por ahora sus endpoints viven en `pedidos-service`, junto a la base
+de datos de pedidos: `GET /api/reports/{kpis,sales,lead-time,top-products}`,
+`GET /api/audit/events` y `GET /api/health`. El Gateway debe dirigir también
+esas rutas a `pedidos-service:8081`. Todos requieren rol Admin.
+
+Los reportes cuentan pedidos completados para ventas y excluyen cancelados.
+`activeUsers` queda `null` porque no hay fuente confiable; el lead time solo se
+calcula si existe un evento COMPLETED persistido. Auditoría guarda creación y
+cambios de estado de pedidos en la misma base de datos. Productos publica
+actualizaciones en RabbitMQ (`products.updated.audit`) desde un outbox local
+con reintentos y el consumidor de pedidos las persiste; ambos servicios deben
+usar el mismo broker. `USER_LOGIN` no se emite porque aún no existe un evento
+de autenticación confiable.
+
+`/api/health` informa `bff: DOWN` porque no hay BFF. `orders` y `report`
+comprueban la base de datos local; `products` comprueba que el servicio
+protegido responde 401 sin token; `audit` comprueba base de datos y RabbitMQ.
+Los nombres `report` y `audit` representan módulos dentro de pedidos, no
+procesos independientes.
+
 `pedidos-service` expone `GET/POST /api/orders`, `GET/PUT /api/orders/{id}` y
 `PATCH /api/orders/{id}/status`. La lista acepta `status`, `q`, `from`, `to`,
 `page` (desde cero) y `pageSize` (1 a 100), y responde `{items,total,page,pageSize}`.
