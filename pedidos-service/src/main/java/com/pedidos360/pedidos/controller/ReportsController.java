@@ -3,6 +3,7 @@ package com.pedidos360.pedidos.controller;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
+import com.pedidos360.pedidos.model.OrderStatus;
 import com.pedidos360.pedidos.repository.PedidoRepository;
 import jakarta.transaction.Transactional;
 import java.time.*;
@@ -85,12 +86,7 @@ public class ReportsController {
         return repository.findAll().stream().filter(p -> p.getFecha() != null && !p.getFecha().toLocalDate().isBefore(start)).toList();
     }
     private String status(Pedido p) {
-        return switch (p.getEstado() == null ? "" : p.getEstado().toUpperCase()) {
-            case "PENDIENTE" -> "CREATED";
-            case "EN_PREPARACION" -> "IN_PROGRESS";
-            case "ENTREGADO" -> "COMPLETED";
-            default -> p.getEstado() == null ? "UNKNOWN" : p.getEstado().toUpperCase();
-        };
+        return OrderStatus.fromStored(p.getEstado()).map(Enum::name).orElse("UNKNOWN");
     }
     private Double leadDays(Pedido p) {
         Optional<PedidoStatusEvent> done = p.getHistory().stream().filter(e -> "COMPLETED".equals(e.getStatus()) && e.getChangedAt() != null).findFirst();

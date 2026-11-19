@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
@@ -30,5 +32,20 @@ class OrderOwnershipQueryTest {
         assertEquals(String.valueOf(mine.getId()), page.items().getFirst().id());
         var byId = api.list(jwt, null, String.valueOf(mine.getId()), null, null, 0, 10);
         assertEquals(1, byId.total());
+    }
+
+    @Test @Transactional void versionPersistidaImpideUnSegundoCambioObsoleto() {
+        Pedido p = new Pedido("Cliente", "Detalle", 100.0, "CREATED");
+        p.setCustomerId("owner-1"); p.setCustomerTenantId("tenant-1");
+        repository.saveAndFlush(p);
+        Long initial = p.getVersion();
+        Jwt admin = Jwt.withTokenValue("admin").header("alg", "none")
+            .claim("roles", List.of("Admin")).claim("oid", "admin-1").build();
+        var changed = api.status(p.getId(), new OrderApiController.StatusInput("ACCEPTED", initial), admin);
+        assertEquals("ACCEPTED", changed.status());
+        assertEquals(initial + 1, changed.version());
+        var conflict = assertThrows(ResponseStatusException.class,
+            () -> api.status(p.getId(), new OrderApiController.StatusInput("CANCELLED", initial), admin));
+        assertEquals(HttpStatus.CONFLICT, conflict.getStatusCode());
     }
 }

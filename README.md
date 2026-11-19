@@ -30,6 +30,13 @@ procesos independientes.
 `pedidos-service` expone `GET/POST /api/orders`, `GET/PUT /api/orders/{id}` y
 `PATCH /api/orders/{id}/status`. La lista acepta `status`, `q`, `from`, `to`,
 `page` (desde cero) y `pageSize` (1 a 100), y responde `{items,total,page,pageSize}`.
+Cada pedido devuelve `version`. Para cambiar el estado, Admin envía
+`PATCH /api/orders/{id}/status` con `{ "status": "ACCEPTED", "expectedVersion": 0 }`.
+Si el pedido cambió desde la lectura, la API responde 409 y Angular recarga el
+detalle. PUT solo cambia los datos del pedido; no cambia su estado. El servidor
+asigna CREATED al crear. Las transiciones admitidas son CREATED a ACCEPTED o
+CANCELLED, ACCEPTED a IN_PROGRESS o CANCELLED, e IN_PROGRESS a COMPLETED o
+CANCELLED. COMPLETED y CANCELLED son terminales.
 El rol Cliente recibe solo pedidos cuyos `customerId` y `customerTenantId`
 coinciden con `oid` y `tid` del access token. Los registros históricos sin
 propietario solo son visibles para Admin. `POST /pedidos` ya no se usa, pues
@@ -72,6 +79,14 @@ productos nuevos sin dueño. Ambos servicios admiten `PATCH` en CORS.
 Antes de desplegar sobre MySQL existente, preparar migración de esquema para
 propietario, `version`, ítems, historial y stock. Las filas existentes no deben
 recibir un propietario inferido por nombre; asignarlo solo tras verificarlo.
+Tras respaldar la base y desplegar la columna `version`, ejecutar
+[`2026-11-18-order-status.sql`](pedidos-service/db/migrations/2026-11-18-order-status.sql)
+en la base de pedidos. Convierte PENDIENTE a CREATED, EN_PREPARACION a
+IN_PROGRESS y ENTREGADO a COMPLETED; inicializa versiones nulas en 0. El
+script lista los valores sin equivalencia para revisión y no los modifica.
+La API conserva esos valores y Angular los muestra como «SIN EQUIVALENCIA»;
+no permite avanzar el estado hasta resolverlos. No se deducen ACCEPTED ni
+CANCELLED a partir de datos antiguos.
 Los precios e ítems que llegan del navegador todavía necesitan cotejo con el
 catálogo y reglas de reserva de stock antes de tratar el total como importe
 autoritativo. El API Gateway aún debe enrutar `/api/orders/*` y

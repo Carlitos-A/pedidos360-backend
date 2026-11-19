@@ -4,6 +4,7 @@ import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
+import com.pedidos360.pedidos.model.OrderStatus;
 import com.pedidos360.pedidos.repository.PedidoRepository;
 import com.pedidos360.pedidos.repository.AuditEventRepository;
 import com.pedidos360.pedidos.model.AuditEvent;
@@ -46,13 +47,13 @@ public class OrderApiController {
 
     public record OrderInput(String customerName, String customerId, String customerTenantId,
                              String detail, Long total, List<PedidoItem> items) {}
-    public record StatusInput(String status) {}
+    public record StatusInput(String status, Long expectedVersion) {}
     public record OwnerInput(String customerId, String customerTenantId) {}
     public record LegacyOwnerInput(Long orderId, String customerId, String customerTenantId) {}
     public record Page<T>(List<T> items, long total, int page, int pageSize) {}
     public record OrderView(String id, String customerName, String customerId, String customerTenantId,
                             String detail, Double total, String status, String createdAt,
-                            String updatedAt, List<PedidoStatusEvent> history, List<PedidoItem> items) {}
+                            String updatedAt, Long version, List<PedidoStatusEvent> history, List<PedidoItem> items) {}
 
     @GetMapping
     @Transactional
@@ -113,9 +114,9 @@ public class OrderApiController {
         apply(p, input);
         p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId());
         p.setCliente(owner.name());
-        p.setEstado("CREATED");
+        p.setEstado(OrderStatus.CREATED.name());
         p.setFecha(java.time.LocalDateTime.now(SANTIAGO));
-        p.getHistory().add(event("CREATED", jwt));
+        p.getHistory().add(event(OrderStatus.CREATED.name(), jwt));
         repository.saveAndFlush(p);
         audit.save(new AuditEvent("order-created-" + p.getId(), "ORDER_CREATED", "Pedido " + p.getId() + " creado", actorEmail(jwt), OffsetDateTime.now()));
         publisher.publicarPedidoCreado(p);
@@ -174,21 +175,22 @@ public class OrderApiController {
     @PatchMapping("/{id}/status")
     @Transactional
     public OrderView status(@PathVariable Long id, @RequestBody StatusInput input, @AuthenticationPrincipal Jwt jwt) {
+        if (input == null || input.expectedVersion() == null || input.expectedVersion() < 0) bad();
+        OrderStatus next = OrderStatus.fromInput(input.status())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado desconocido"));
         Pedido p = find(id);
-        String current = normalized(p.getEstado());
-        String next = normalized(input.status());
-        Map<String, List<String>> allowed = Map.of(
-            "CREATED", List.of("ACCEPTED", "CANCELLED"),
-            "ACCEPTED", List.of("IN_PROGRESS", "CANCELLED"),
-            "IN_PROGRESS", List.of("COMPLETED", "CANCELLED"));
-        if (!allowed.getOrDefault(current, List.of()).contains(next))
+        if (!input.expectedVersion().equals(p.getVersion()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "El pedido cambió; vuelve a cargarlo");
+        OrderStatus current = OrderStatus.fromStored(p.getEstado())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Estado histórico sin equivalencia"));
+        if (!current.canTransitionTo(next))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Transición de estado inválida");
-        p.setEstado(next);
+        p.setEstado(next.name());
         p.setUpdatedAt(OffsetDateTime.now());
-        p.getHistory().add(event(next, jwt));
+        p.getHistory().add(event(next.name(), jwt));
         repository.saveAndFlush(p);
         audit.save(new AuditEvent("order-status-" + p.getId() + "-" + p.getVersion(),
-            "CANCELLED".equals(next) ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED",
+            next == OrderStatus.CANCELLED ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED",
             "Pedido " + p.getId() + " pasó a " + next, actorEmail(jwt), OffsetDateTime.now()));
         return view(p);
     }
@@ -215,13 +217,8 @@ public class OrderApiController {
     private boolean blank(String s) { return s == null || s.isBlank(); }
     private void bad() { throw new ResponseStatusException(HttpStatus.BAD_REQUEST); }
     private String normalized(String s) {
-        if (s == null) return "UNKNOWN";
-        return switch (s.trim().toUpperCase()) {
-            case "PENDIENTE" -> "CREATED";
-            case "EN_PREPARACION" -> "IN_PROGRESS";
-            case "ENTREGADO" -> "COMPLETED";
-            default -> s.trim().toUpperCase();
-        };
+        return OrderStatus.fromStored(s).map(Enum::name)
+            .orElse(s == null || s.isBlank() ? "UNKNOWN" : s.strip().toUpperCase(java.util.Locale.ROOT));
     }
     private PedidoStatusEvent event(String status, Jwt jwt) {
         return new PedidoStatusEvent(status, OffsetDateTime.now(), jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name"), "Admin");
@@ -235,7 +232,7 @@ public class OrderApiController {
         String date = p.getFecha() == null ? "" : p.getFecha().atZone(SANTIAGO).toOffsetDateTime().toString();
         return new OrderView(String.valueOf(p.getId()), p.getCliente(), p.getCustomerId(), p.getCustomerTenantId(),
             p.getDetalle(), p.getTotal(), normalized(p.getEstado()), date,
-            p.getUpdatedAt() == null ? null : p.getUpdatedAt().toString(),
+            p.getUpdatedAt() == null ? null : p.getUpdatedAt().toString(), p.getVersion(),
             List.copyOf(p.getHistory().reversed()), List.copyOf(p.getItems()));
     }
 }
