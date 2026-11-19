@@ -2,6 +2,9 @@ server:
   port: 8081
 
 spring:
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   application:
     name: pedidos-service
 
@@ -14,6 +17,8 @@ spring:
     username: sa
     password: ""
   jpa:
+    properties:
+      hibernate.jdbc.time_zone: UTC
     hibernate:
       ddl-auto: update
 
@@ -41,6 +46,10 @@ spring:
 
 # Audience esperada: el Application ID URI de la app "Pedidos360-API"
 app:
+  internal:
+    key: ${INTERNAL_SERVICE_KEY:}
+  products:
+    internal-url: ${PRODUCTS_INTERNAL_URL:http://localhost:8082}
   identity:
     tenant-id: ${ENTRA_TENANT_ID:bb5324af-c266-41ed-b36c-a971641c7af2}
     graph-client-id: ${GRAPH_CLIENT_ID:}

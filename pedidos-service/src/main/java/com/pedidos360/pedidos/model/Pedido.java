@@ -6,6 +6,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.Instant;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.CollectionTable;
@@ -26,10 +27,21 @@ public class Pedido {
     private Long id;
 
     private String cliente;
+    @Column(length = 2000)
     private String detalle;
     private Double total;
+    @Column(name = "total_clp")
+    private Long totalClp;
     private String estado;
     private LocalDateTime fecha;
+    @Column(name = "created_at_utc")
+    private Instant createdAtUtc;
+    @Column(name = "reservation_key", unique = true)
+    private String reservationKey;
+    @Column(name = "inventory_state")
+    private String inventoryState;
+    private String requestActorName;
+    private String requestActorEmail;
 
     @Column(name = "customer_id")
     private String customerId;
@@ -89,6 +101,26 @@ public class Pedido {
     public void setTotal(Double total) {
         this.total = total;
     }
+    public Long getTotalClp() {
+        if (totalClp != null) return totalClp;
+        if (total == null || !Double.isFinite(total) || total < 0 || total != Math.rint(total)
+            || total > 9_007_199_254_740_991d) return null;
+        return total.longValue();
+    }
+    public void setTotalClp(Long value) {
+        this.totalClp = value;
+        this.total = value == null ? null : value.doubleValue();
+    }
+    public Instant getCreatedAtUtc() { return createdAtUtc; }
+    public void setCreatedAtUtc(Instant value) { this.createdAtUtc = value; }
+    public String getReservationKey() { return reservationKey; }
+    public void setReservationKey(String value) { this.reservationKey = value; }
+    public String getInventoryState() { return inventoryState; }
+    public void setInventoryState(String value) { this.inventoryState = value; }
+    public String getRequestActorName() { return requestActorName; }
+    public void setRequestActorName(String value) { this.requestActorName = value; }
+    public String getRequestActorEmail() { return requestActorEmail; }
+    public void setRequestActorEmail(String value) { this.requestActorEmail = value; }
 
     public String getEstado() {
         return estado;

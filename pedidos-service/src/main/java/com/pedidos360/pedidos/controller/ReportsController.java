@@ -37,11 +37,11 @@ public class ReportsController {
         for (String s : List.of("CREATED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"))
             byStatus.put(s, orders.stream().filter(p -> status(p).equals(s)).count());
         List<Pedido> completed = orders.stream().filter(p -> status(p).equals("COMPLETED")).toList();
-        double sales = completed.stream().mapToDouble(p -> p.getTotal() == null ? 0 : p.getTotal()).sum();
+        double sales = completed.stream().mapToDouble(p -> p.getTotalClp() == null ? 0 : p.getTotalClp()).sum();
         List<Double> leads = completed.stream().map(this::leadDays).filter(Objects::nonNull).toList();
         Double leadAverage = leads.isEmpty() ? null : leads.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
         double monthly = completed.stream().filter(p -> p.getFecha() != null && YearMonth.from(p.getFecha()).equals(YearMonth.from(today)))
-            .mapToDouble(p -> p.getTotal() == null ? 0 : p.getTotal()).sum();
+            .mapToDouble(p -> p.getTotalClp() == null ? 0 : p.getTotalClp()).sum();
         long todayDone = completed.stream().filter(p -> p.getHistory().stream().anyMatch(e -> "COMPLETED".equals(e.getStatus())
             && e.getChangedAt() != null && e.getChangedAt().atZoneSameInstant(ZONE).toLocalDate().equals(today))).count();
         return new Kpis(orders.size(), monthly, null, leadAverage, byStatus.get("CREATED"),
@@ -56,7 +56,7 @@ public class ReportsController {
         return range(days).stream().filter(p -> status(p).equals("COMPLETED") && p.getFecha() != null)
             .collect(Collectors.groupingBy(p -> YearMonth.from(p.getFecha()), TreeMap::new, Collectors.toList()))
             .entrySet().stream().map(e -> new Sales(e.getKey().toString(),
-                e.getValue().stream().mapToDouble(p -> p.getTotal() == null ? 0 : p.getTotal()).sum(), e.getValue().size())).toList();
+                e.getValue().stream().mapToDouble(p -> p.getTotalClp() == null ? 0 : p.getTotalClp()).sum(), e.getValue().size())).toList();
     }
 
     @GetMapping("/lead-time")
@@ -83,7 +83,9 @@ public class ReportsController {
     private List<Pedido> range(int days) {
         if (days < 1 || days > 3650) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "days fuera de rango");
         LocalDate start = LocalDate.now(ZONE).minusDays(days - 1L);
-        return repository.findAll().stream().filter(p -> p.getFecha() != null && !p.getFecha().toLocalDate().isBefore(start)).toList();
+        return repository.findAll().stream().filter(p -> p.getFecha() != null
+            && (p.getInventoryState() == null || "READY".equals(p.getInventoryState()))
+            && !p.getFecha().toLocalDate().isBefore(start)).toList();
     }
     private String status(Pedido p) {
         return OrderStatus.fromStored(p.getEstado()).map(Enum::name).orElse("UNKNOWN");

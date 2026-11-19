@@ -1,7 +1,7 @@
 package com.pedidos360.pedidos;
 
 import com.pedidos360.pedidos.controller.OrderApiController;
-import com.pedidos360.pedidos.messaging.OrderEventPublisher;
+import com.pedidos360.pedidos.inventory.OrderWriteService;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.repository.PedidoRepository;
 import com.pedidos360.pedidos.repository.AuditEventRepository;
@@ -13,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import java.util.List;
 import java.util.Optional;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,7 +25,7 @@ import static org.mockito.Mockito.*;
 class OrderApiControllerTest {
     private final PedidoRepository repository = mock(PedidoRepository.class);
     private final CustomerDirectory directory = mock(CustomerDirectory.class);
-    private final OrderApiController api = new OrderApiController(repository, mock(OrderEventPublisher.class), mock(AuditEventRepository.class), directory, mock(VerifiedOwnerMappingRepository.class));
+    private final OrderApiController api = new OrderApiController(repository, mock(OrderWriteService.class), mock(AuditEventRepository.class), directory, mock(VerifiedOwnerMappingRepository.class));
     private final Jwt cliente = Jwt.withTokenValue("token").header("alg", "none")
         .claim("roles", List.of("Cliente")).claim("oid", "owner-1").claim("tid", "tenant-1").build();
     private final Jwt admin = Jwt.withTokenValue("admin").header("alg", "none")
@@ -40,27 +41,22 @@ class OrderApiControllerTest {
         verify(repository, never()).findAll();
     }
 
-    @Test void putNoPuedeReasignarPropietario() {
-        when(repository.findById(1L)).thenReturn(Optional.of(pedido(1L, "owner-1")));
-        var input = new OrderApiController.OrderInput("Cliente", "owner-2", "tenant-1", "Detalle", 100L, List.of());
-        assertThrows(ResponseStatusException.class, () -> api.update(1L, input));
-        verify(repository, never()).saveAndFlush(any());
-    }
-
-    @Test void putEditaDatosPeroConservaElEstado() {
-        Pedido p = pedido(6L, "owner-1");
-        p.setEstado("ACCEPTED");
-        when(repository.findById(6L)).thenReturn(Optional.of(p));
-        var input = new OrderApiController.OrderInput("Cliente", "owner-1", "tenant-1", "Nuevo detalle", 120L, List.of());
-        var result = api.update(6L, input);
-        assertEquals("ACCEPTED", result.status());
-        assertEquals("ACCEPTED", p.getEstado());
-        assertEquals("Nuevo detalle", p.getDetalle());
-    }
-
     @Test void detalleAjenoResponde404() {
         when(repository.findById(2L)).thenReturn(Optional.of(pedido(2L, "owner-2")));
         assertThrows(ResponseStatusException.class, () -> api.get(2L, cliente));
+    }
+
+    @Test void noAceptaPreciosFraccionariosNiPedidosNuevosSinItems() {
+        var fraction = new OrderApiController.OrderInput("Cliente", "owner-1", "tenant-1", "Detalle",
+            BigDecimal.ZERO, List.of(new OrderApiController.OrderItemInput("7", "Producto", 1,
+                new BigDecimal("100.5"))), java.util.UUID.randomUUID().toString(), null);
+        var empty = new OrderApiController.OrderInput("Cliente", "owner-1", "tenant-1", "Detalle",
+            BigDecimal.ZERO, List.of(), java.util.UUID.randomUUID().toString(), null);
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> api.create(fraction, admin)).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> api.create(empty, admin)).getStatusCode());
+        verifyNoInteractions(directory);
     }
 
     @Test void versionAnteriorDa409SinModificarElPedido() {

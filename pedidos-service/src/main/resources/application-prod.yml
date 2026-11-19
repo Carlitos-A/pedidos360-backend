@@ -7,6 +7,9 @@ server:
   port: 8081
 
 spring:
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   application:
     name: pedidos-service
 
@@ -17,6 +20,8 @@ spring:
     username: ${DB_USER}
     password: ${DB_PASSWORD}
   jpa:
+    properties:
+      hibernate.jdbc.time_zone: UTC
     hibernate:
       ddl-auto: update
 
@@ -35,6 +40,10 @@ spring:
     virtual-host: ${RABBITMQ_VHOST:/pedidos360}
 
 app:
+  internal:
+    key: ${INTERNAL_SERVICE_KEY:}
+  products:
+    internal-url: ${PRODUCTS_INTERNAL_URL:http://localhost:8082}
   identity:
     tenant-id: ${ENTRA_TENANT_ID}
     graph-client-id: ${GRAPH_CLIENT_ID:}

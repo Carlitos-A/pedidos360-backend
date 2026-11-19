@@ -1,6 +1,6 @@
 package com.pedidos360.pedidos.controller;
 
-import com.pedidos360.pedidos.messaging.OrderEventPublisher;
+import com.pedidos360.pedidos.inventory.OrderWriteService;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
@@ -11,12 +11,12 @@ import com.pedidos360.pedidos.model.AuditEvent;
 import jakarta.transaction.Transactional;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.math.BigDecimal;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -29,30 +29,33 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @RestController
 @RequestMapping("/api/orders")
 public class OrderApiController {
-    private static final ZoneId SANTIAGO = ZoneId.of("America/Santiago");
     private final PedidoRepository repository;
-    private final OrderEventPublisher publisher;
+    private final OrderWriteService writer;
     private final AuditEventRepository audit;
     private final CustomerDirectory directory;
     private final VerifiedOwnerMappingRepository mappings;
-    public OrderApiController(PedidoRepository repository, OrderEventPublisher publisher, AuditEventRepository audit,
+    public OrderApiController(PedidoRepository repository, OrderWriteService writer, AuditEventRepository audit,
                               CustomerDirectory directory, VerifiedOwnerMappingRepository mappings) {
-        this.repository = repository; this.publisher = publisher; this.audit = audit; this.directory = directory;
+        this.repository = repository; this.writer = writer; this.audit = audit; this.directory = directory;
         this.mappings = mappings;
     }
 
+    public record OrderItemInput(String productId, String name, Integer quantity, BigDecimal unitPrice) {}
     public record OrderInput(String customerName, String customerId, String customerTenantId,
-                             String detail, Long total, List<PedidoItem> items) {}
+                             String detail, BigDecimal total, List<OrderItemInput> items,
+                             String requestId, Long expectedVersion) {}
     public record StatusInput(String status, Long expectedVersion) {}
     public record OwnerInput(String customerId, String customerTenantId) {}
     public record LegacyOwnerInput(Long orderId, String customerId, String customerTenantId) {}
     public record Page<T>(List<T> items, long total, int page, int pageSize) {}
     public record OrderView(String id, String customerName, String customerId, String customerTenantId,
-                            String detail, Double total, String status, String createdAt,
+                            String detail, Long total, String status, String createdAt,
                             String updatedAt, Long version, List<PedidoStatusEvent> history, List<PedidoItem> items) {}
 
     @GetMapping
@@ -69,6 +72,7 @@ public class OrderApiController {
         if (!admin && (blank(oid) || blank(tid))) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         Specification<Pedido> criteria = (root, query, cb) -> {
             List<Predicate> conditions = new ArrayList<>();
+            conditions.add(cb.or(cb.isNull(root.get("inventoryState")), cb.equal(root.get("inventoryState"), "READY")));
             if (!admin) {
                 conditions.add(cb.equal(root.get("customerId"), oid));
                 conditions.add(cb.equal(root.get("customerTenantId"), tid));
@@ -100,41 +104,25 @@ public class OrderApiController {
     @Transactional
     public OrderView get(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
         Pedido p = find(id);
-        if (!visible(p, jwt)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (!visible(p, jwt) || !ready(p)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         return view(p);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Transactional
     public OrderView create(@RequestBody OrderInput input, @AuthenticationPrincipal Jwt jwt) {
-        validate(input);
+        validate(input, true);
         var owner = directory.resolve(input.customerId(), input.customerTenantId());
-        Pedido p = new Pedido();
-        apply(p, input);
-        p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId());
-        p.setCliente(owner.name());
-        p.setEstado(OrderStatus.CREATED.name());
-        p.setFecha(java.time.LocalDateTime.now(SANTIAGO));
-        p.getHistory().add(event(OrderStatus.CREATED.name(), jwt));
-        repository.saveAndFlush(p);
-        audit.save(new AuditEvent("order-created-" + p.getId(), "ORDER_CREATED", "Pedido " + p.getId() + " creado", actorEmail(jwt), OffsetDateTime.now()));
-        publisher.publicarPedidoCreado(p);
-        return view(p);
+        String actor = jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name");
+        return view(writer.create(new OrderWriteService.Input(input.requestId(), null, input.detail(), items(input)),
+            owner, actor, actorEmail(jwt)));
     }
 
     @PutMapping("/{id}")
-    @Transactional
     public OrderView update(@PathVariable Long id, @RequestBody OrderInput input) {
-        validate(input);
-        Pedido p = find(id);
-        if (!java.util.Objects.equals(p.getCustomerId(), input.customerId()) ||
-            !java.util.Objects.equals(p.getCustomerTenantId(), input.customerTenantId()))
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Usa la reasignación administrativa para cambiar propietario");
-        apply(p, input);
-        p.setUpdatedAt(OffsetDateTime.now());
-        repository.saveAndFlush(p);
-        return view(p);
+        validate(input, false);
+        return view(writer.update(id, new OrderWriteService.Input(null, input.expectedVersion(), input.detail(), items(input)),
+            input.customerId(), input.customerTenantId()));
     }
 
     @PatchMapping("/{id}/owner")
@@ -143,8 +131,10 @@ public class OrderApiController {
         if (input == null) bad();
         var owner = directory.resolve(input.customerId(), input.customerTenantId());
         Pedido p = find(id);
+        if (!ready(p) || writer.hasPendingUpdate(id) || p.getReservationKey() != null && !p.getItems().isEmpty())
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Pedido con inventario reservado; edita sus ítems antes de reasignar");
         p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId()); p.setCliente(owner.name());
-        p.setUpdatedAt(OffsetDateTime.now());
+        p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         repository.saveAndFlush(p);
         audit.save(new AuditEvent("order-owner-" + p.getId() + "-" + p.getVersion(), "ORDER_OWNER_CHANGED",
             "Propietario del pedido " + p.getId() + " reasignado", actorEmail(jwt), OffsetDateTime.now()));
@@ -163,7 +153,7 @@ public class OrderApiController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Pedido ya asignado: " + item.orderId());
             var owner = directory.resolve(item.customerId(), item.customerTenantId());
             p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId()); p.setCliente(owner.name());
-            p.setUpdatedAt(OffsetDateTime.now());
+            p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             repository.saveAndFlush(p);
             mappings.save(new VerifiedOwnerMapping(p.getId(), owner.id(), owner.tenantId(), actorEmail(jwt), OffsetDateTime.now()));
             audit.save(new AuditEvent("order-owner-migrated-" + p.getId(), "ORDER_OWNER_CHANGED",
@@ -179,6 +169,8 @@ public class OrderApiController {
         OrderStatus next = OrderStatus.fromInput(input.status())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado desconocido"));
         Pedido p = find(id);
+        if (!ready(p) || writer.hasPendingUpdate(id))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Pedido pendiente de inventario");
         if (!input.expectedVersion().equals(p.getVersion()))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "El pedido cambió; vuelve a cargarlo");
         OrderStatus current = OrderStatus.fromStored(p.getEstado())
@@ -186,12 +178,21 @@ public class OrderApiController {
         if (!current.canTransitionTo(next))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Transición de estado inválida");
         p.setEstado(next.name());
-        p.setUpdatedAt(OffsetDateTime.now());
+        p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         p.getHistory().add(event(next.name(), jwt));
         repository.saveAndFlush(p);
         audit.save(new AuditEvent("order-status-" + p.getId() + "-" + p.getVersion(),
             next == OrderStatus.CANCELLED ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED",
             "Pedido " + p.getId() + " pasó a " + next, actorEmail(jwt), OffsetDateTime.now()));
+        if (next == OrderStatus.CANCELLED && p.getReservationKey() != null) {
+            Long orderId = p.getId();
+            writer.markReleasePending(orderId);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    try { writer.release(orderId); } catch (RuntimeException ignored) { /* reintento programado */ }
+                }
+            });
+        }
         return view(p);
     }
 
@@ -202,18 +203,29 @@ public class OrderApiController {
             && p.getCustomerId().equals(jwt.getClaimAsString("oid"))
             && p.getCustomerTenantId().equals(jwt.getClaimAsString("tid"));
     }
-    private void apply(Pedido p, OrderInput input) {
-        p.setDetalle(input.detail().strip());
-        p.setTotal(input.total().doubleValue());
-        p.getItems().clear(); if (input.items() != null) p.getItems().addAll(input.items());
+    private void validate(OrderInput i, boolean creating) {
+        if (i == null || blank(i.customerId()) || blank(i.customerTenantId()) || blank(i.detail()) || i.detail().length() > 2000
+            || i.items() == null || i.items().size() > 100 || creating && i.items().isEmpty()
+            || creating && (blank(i.requestId()) || !validUuid(i.requestId()))
+            || !creating && (i.expectedVersion() == null || i.expectedVersion() < 0)
+            || i.items().stream().anyMatch(x -> x == null || blank(x.productId())
+                || !x.productId().matches("[1-9][0-9]*") || x.quantity() == null || x.quantity() < 1
+                || x.unitPrice() == null || !integerClp(x.unitPrice()))
+            || i.items().stream().map(OrderItemInput::productId).distinct().count() != i.items().size()) bad();
     }
-    private void validate(OrderInput i) {
-        if (i == null || blank(i.customerName()) || blank(i.customerId()) || blank(i.customerTenantId())
-            || blank(i.detail()) || i.total() == null || i.total() < 0
-            || i.items() != null && i.items().stream().anyMatch(x -> x == null || blank(x.getProductId())
-                || blank(x.getName()) || x.getQuantity() == null || x.getQuantity() < 1
-                || x.getUnitPrice() == null || x.getUnitPrice() < 0)) bad();
+    private boolean integerClp(BigDecimal value) {
+        try { return value.signum() >= 0 && value.longValueExact() <= 9_007_199_254_740_991L; }
+        catch (ArithmeticException ex) { return false; }
     }
+    private List<PedidoItem> items(OrderInput input) {
+        return input.items().stream().map(x -> new PedidoItem(x.productId(), x.name(), x.quantity(),
+            x.unitPrice().longValueExact())).toList();
+    }
+    private boolean validUuid(String value) {
+        try { return java.util.UUID.fromString(value).toString().equalsIgnoreCase(value); }
+        catch (IllegalArgumentException ex) { return false; }
+    }
+    private boolean ready(Pedido p) { return p.getInventoryState() == null || "READY".equals(p.getInventoryState()); }
     private boolean blank(String s) { return s == null || s.isBlank(); }
     private void bad() { throw new ResponseStatusException(HttpStatus.BAD_REQUEST); }
     private String normalized(String s) {
@@ -221,7 +233,7 @@ public class OrderApiController {
             .orElse(s == null || s.isBlank() ? "UNKNOWN" : s.strip().toUpperCase(java.util.Locale.ROOT));
     }
     private PedidoStatusEvent event(String status, Jwt jwt) {
-        return new PedidoStatusEvent(status, OffsetDateTime.now(), jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name"), "Admin");
+        return new PedidoStatusEvent(status, OffsetDateTime.now(ZoneOffset.UTC), jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name"), "Admin");
     }
     private String actorEmail(Jwt jwt) {
         String email = jwt.getClaimAsString("preferred_username");
@@ -229,9 +241,9 @@ public class OrderApiController {
         return email;
     }
     private OrderView view(Pedido p) {
-        String date = p.getFecha() == null ? "" : p.getFecha().atZone(SANTIAGO).toOffsetDateTime().toString();
+        String date = p.getCreatedAtUtc() == null ? null : p.getCreatedAtUtc().toString();
         return new OrderView(String.valueOf(p.getId()), p.getCliente(), p.getCustomerId(), p.getCustomerTenantId(),
-            p.getDetalle(), p.getTotal(), normalized(p.getEstado()), date,
+            p.getDetalle(), p.getTotalClp(), normalized(p.getEstado()), date,
             p.getUpdatedAt() == null ? null : p.getUpdatedAt().toString(), p.getVersion(),
             List.copyOf(p.getHistory().reversed()), List.copyOf(p.getItems()));
     }
