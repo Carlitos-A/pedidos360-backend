@@ -158,15 +158,19 @@ RDS MySQL en producción y H2 en memoria para desarrollo, con credenciales por v
 
 ## EP4: mensajería asíncrona con RabbitMQ
 
-`pedidos-service` publica `OrderCreatedEvent` después de guardar un pedido. Los tres consumidores representan los pasos desacoplados de notificación, generación de ticket y auditoría. En esta entrega dejan constancia del procesamiento en el log; allí se conecta más adelante un proveedor real de correo o documentos.
+`pedidos-service` guarda el historial de estados junto con el pedido. Cada evento nuevo incluye estado previo y nuevo, fecha UTC del servidor, nombre, rol, `oid` y `tid` del Admin autenticado. La creación tiene estado previo nulo. Pedidos históricos sin eventos conservan `history: []`; los eventos antiguos no reciben identidad ni estado previo inventados.
+
+La mensajería nueva usa `schemaVersion: 2`: cada evento incluye `eventId`, propietario (`customerId` y `customerTenantId`), ítems, total CLP, actor y fecha UTC. Los consumidores siguen aceptando el `OrderCreatedEvent` antiguo sin versión. El evento se escribe en `order_outbox` en la misma transacción que el pedido y el registro de auditoría. Un trabajo programado lo publica con confirmación de RabbitMQ y reintenta fallos; una caída después de la confirmación puede producir una segunda entrega con el mismo `eventId`, por lo que los consumidores con efectos deben deduplicar por evento y destino. Notificación y ticket aún solo registran el procesamiento en el log; los reportes actuales leen la base de pedidos.
 
 | Caso | Exchange y tipo | Routing key | Cola | DLQ |
 |---|---|---|---|---|
 | Notificación | `pedidos360.orders.direct` (direct) | `orders.created` | `pedidos360.orders.notification` | `pedidos360.orders.notification.dlq` |
 | Ticket | `pedidos360.orders.topic` (topic) | `orders.created.ticket` | `pedidos360.orders.ticket` | `pedidos360.orders.ticket.dlq` |
 | Auditoría | `pedidos360.orders.topic` (topic) | `orders.created.audit` | `pedidos360.orders.audit` | `pedidos360.orders.audit.dlq` |
+| Cambio de estado | `pedidos360.orders.topic` (topic) | `orders.status.changed` | `pedidos360.orders.audit` | `pedidos360.orders.audit.dlq` |
+| Cancelación | `pedidos360.orders.topic` (topic) | `orders.cancelled` | `pedidos360.orders.audit` | `pedidos360.orders.audit.dlq` |
 
-Nombres y claves se centralizan en `pedidos-service/src/main/resources/application.yml`. Los listeners usan ACK manual; cuando el payload no es procesable, hacen NACK sin requeue y RabbitMQ enruta el mensaje a su DLQ.
+Nombres y claves se centralizan en `pedidos-service/src/main/resources/application.yml`. Los listeners usan ACK manual; cuando el payload no es procesable, hacen NACK sin requeue y RabbitMQ enruta el mensaje a su DLQ. En producción, ejecutar [`2026-11-19-order-history-outbox.sql`](pedidos-service/db/migrations/2026-11-19-order-history-outbox.sql) en pedidosdb antes de activar el código. Los perfiles local y prod aún usan `ddl-auto: update`.
 
 ### Levantar el clúster local
 
