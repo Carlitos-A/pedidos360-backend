@@ -20,6 +20,8 @@ public class Producto {
     private String nombre;
     private String categoria;
     private Double precio;
+    @Column(name = "price_clp")
+    private Long priceClp;
     private Integer stock;
     @Column(name = "customer_id")
     private String customerId;
@@ -67,6 +69,16 @@ public class Producto {
 
     public void setPrecio(Double precio) {
         this.precio = precio;
+    }
+    public Long getPriceClp() {
+        if (priceClp != null) return priceClp;
+        if (precio == null || !Double.isFinite(precio) || precio < 0 || precio != Math.rint(precio)
+            || precio > 9_007_199_254_740_991d) return null;
+        return precio.longValue();
+    }
+    public void setPriceClp(Long priceClp) {
+        this.priceClp = priceClp;
+        this.precio = priceClp == null ? null : priceClp.doubleValue();
     }
     public Integer getStock() { return stock; }
     public void setStock(Integer stock) { this.stock = stock; }

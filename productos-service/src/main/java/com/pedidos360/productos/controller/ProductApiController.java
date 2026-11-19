@@ -7,6 +7,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.math.BigDecimal;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,10 +20,10 @@ public class ProductApiController {
     public ProductApiController(ProductoRepository repository, ProductAuditPublisher audit) {
         this.repository = repository; this.audit = audit;
     }
-    public record ProductInput(String name, String category, Double price, Integer stock,
+    public record ProductInput(String name, String category, BigDecimal price, Integer stock,
                                String customerId, String customerTenantId) {}
     public record StockInput(Integer delta) {}
-    public record ProductView(String id, String name, String category, Double price, Integer stock,
+    public record ProductView(String id, String name, String category, Long price, Integer stock,
                               String customerId, String customerTenantId) {}
 
     @GetMapping
@@ -71,16 +72,21 @@ public class ProductApiController {
         return view(p);
     }
     private Producto find(Long id) { return repository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND)); }
-    private ProductView view(Producto p) { return new ProductView(String.valueOf(p.getId()), p.getNombre(), p.getCategoria(), p.getPrecio(), p.getStock(), p.getCustomerId(), p.getCustomerTenantId()); }
+    private ProductView view(Producto p) { return new ProductView(String.valueOf(p.getId()), p.getNombre(), p.getCategoria(), p.getPriceClp(), p.getStock(), p.getCustomerId(), p.getCustomerTenantId()); }
     private void apply(Producto p, ProductInput i) {
-        p.setNombre(i.name().strip()); p.setCategoria(i.category().strip()); p.setPrecio(i.price()); p.setStock(i.stock());
+        p.setNombre(i.name().strip()); p.setCategoria(i.category().strip()); p.setPriceClp(i.price().longValueExact()); p.setStock(i.stock());
         p.setCustomerId(i.customerId().strip()); p.setCustomerTenantId(i.customerTenantId().strip());
     }
     private void validate(ProductInput i) {
-        if (i == null || i.name() == null || i.name().isBlank() || i.category() == null || i.category().isBlank()
-            || i.price() == null || !Double.isFinite(i.price()) || i.price() < 0 || i.stock() == null || i.stock() < 0
+        if (i == null || i.name() == null || i.name().isBlank() || i.name().length() > 200
+            || i.category() == null || i.category().isBlank() || i.category().length() > 200
+            || i.price() == null || !integerClp(i.price()) || i.stock() == null || i.stock() < 0
             || i.customerId() == null || i.customerId().isBlank() || i.customerTenantId() == null || i.customerTenantId().isBlank())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+    }
+    private boolean integerClp(BigDecimal price) {
+        try { return price.signum() >= 0 && price.longValueExact() <= 9_007_199_254_740_991L; }
+        catch (ArithmeticException ex) { return false; }
     }
     private String email(Jwt jwt) {
         String value = jwt.getClaimAsString("preferred_username");

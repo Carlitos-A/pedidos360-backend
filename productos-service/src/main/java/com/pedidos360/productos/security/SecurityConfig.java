@@ -44,6 +44,7 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/internal/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/productos/**")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**")
