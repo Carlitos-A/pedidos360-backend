@@ -2,7 +2,8 @@ package com.pedidos360.pedidos.messaging;
 
 import java.time.LocalDateTime;
 
-/** Evento estable que se publica después de guardar un pedido. */
+/** Esquema v1 conservado como referencia para mensajes históricos en RabbitMQ/DLQ. */
+@Deprecated
 public record OrderCreatedEvent(
         Long orderId,
         String customer,

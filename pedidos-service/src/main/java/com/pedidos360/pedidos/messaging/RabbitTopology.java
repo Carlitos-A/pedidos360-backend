@@ -48,6 +48,10 @@ public class RabbitTopology {
     private String ticketCreatedKey;
     @Value("${pedidos360.messaging.routing-keys.audit-created}")
     private String auditCreatedKey;
+    @Value("${pedidos360.messaging.routing-keys.status-changed}")
+    private String statusChangedKey;
+    @Value("${pedidos360.messaging.routing-keys.order-cancelled}")
+    private String orderCancelledKey;
 
     @Bean public DirectExchange ordersDirectExchange() { return new DirectExchange(ordersDirectName, true, false); }
     @Bean public TopicExchange ordersTopicExchange() { return new TopicExchange(ordersTopicName, true, false); }
@@ -75,6 +79,14 @@ public class RabbitTopology {
     @Bean public Binding productAuditBinding(@Qualifier("auditQueue") Queue auditQueue,
             @Qualifier("ordersTopicExchange") TopicExchange ordersTopicExchange) {
         return BindingBuilder.bind(auditQueue).to(ordersTopicExchange).with("products.updated.audit");
+    }
+    @Bean public Binding statusAuditBinding(@Qualifier("auditQueue") Queue auditQueue,
+            @Qualifier("ordersTopicExchange") TopicExchange ordersTopicExchange) {
+        return BindingBuilder.bind(auditQueue).to(ordersTopicExchange).with(statusChangedKey);
+    }
+    @Bean public Binding cancelledAuditBinding(@Qualifier("auditQueue") Queue auditQueue,
+            @Qualifier("ordersTopicExchange") TopicExchange ordersTopicExchange) {
+        return BindingBuilder.bind(auditQueue).to(ordersTopicExchange).with(orderCancelledKey);
     }
     @Bean public Binding notificationDlqBinding(@Qualifier("notificationDlq") Queue notificationDlq,
             @Qualifier("deadLetterExchange") DirectExchange deadLetterExchange) {

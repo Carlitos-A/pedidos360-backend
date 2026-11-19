@@ -3,6 +3,7 @@ package com.pedidos360.pedidos.inventory;
 import com.pedidos360.pedidos.identity.CustomerDirectory.Customer;
 import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.AuditEvent;
+import com.pedidos360.pedidos.model.OrderActor;
 import com.pedidos360.pedidos.model.OrderStatus;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
@@ -56,7 +57,7 @@ public class OrderWriteService {
         this.independentTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    public Pedido create(Input input, Customer owner, String actorName, String actorEmail) {
+    public Pedido create(Input input, Customer owner, OrderActor actor) {
         Pedido pending;
         try {
             pending = transactions.execute(tx -> {
@@ -73,7 +74,9 @@ public class OrderWriteService {
             Instant now = Instant.now();
             p.setCreatedAtUtc(now);
             p.setFecha(LocalDateTime.ofInstant(now, SANTIAGO));
-            p.setRequestActorName(actorName); p.setRequestActorEmail(actorEmail);
+            p.setRequestActorName(actor.name()); p.setRequestActorEmail(actor.email());
+            p.setRequestActorId(actor.id()); p.setRequestActorTenantId(actor.tenantId());
+            p.setRequestActorRole(actor.role());
             p.getItems().addAll(input.items());
             Pedido saved = orders.saveAndFlush(p);
             touch(saved);
@@ -154,27 +157,24 @@ public class OrderWriteService {
                 transactions.executeWithoutResult(tx -> orders.findById(id).ifPresent(x -> x.setInventoryState("FAILED")));
             throw ex;
         }
-        boolean[] confirmed = {false};
         Pedido ready = transactions.execute(tx -> {
             Pedido current = orders.findById(id).orElseThrow();
             if ("READY".equals(current.getInventoryState())) { touch(current); return current; }
             current.getItems().clear(); current.getItems().addAll(snapshot(quote));
             current.setTotalClp(quote.total()); current.setInventoryState("READY");
-            current.getHistory().add(new PedidoStatusEvent(OrderStatus.CREATED.name(),
-                OffsetDateTime.ofInstant(current.getCreatedAtUtc(), ZoneId.of("UTC")),
-                current.getRequestActorName(), "Admin"));
+            OrderActor actor = new OrderActor(current.getRequestActorId(), current.getRequestActorTenantId(),
+                current.getRequestActorName(), current.getRequestActorRole(), current.getRequestActorEmail());
+            PedidoStatusEvent created = new PedidoStatusEvent(null, OrderStatus.CREATED.name(),
+                OffsetDateTime.ofInstant(current.getCreatedAtUtc(), ZoneOffset.UTC), actor);
+            current.getHistory().add(created);
             Pedido saved = orders.saveAndFlush(current);
             audit.save(new AuditEvent("order-created-" + id, "ORDER_CREATED", "Pedido " + id + " creado",
-                current.getRequestActorEmail(), OffsetDateTime.now()));
-            confirmed[0] = true;
+                current.getRequestActorEmail(), OffsetDateTime.now(ZoneOffset.UTC)));
+            publisher.enqueueCreated(saved, created);
             touch(saved);
             return saved;
         });
         if (ready == null) throw new IllegalStateException("No se pudo confirmar el pedido");
-        if (confirmed[0]) {
-            try { publisher.publicarPedidoCreado(ready); }
-            catch (RuntimeException ex) { log.error("Pedido {} confirmado; falló la publicación RabbitMQ", id, ex); }
-        }
         return ready;
     }
 

@@ -40,7 +40,8 @@ class OrderOwnershipQueryTest {
         repository.saveAndFlush(p);
         Long initial = p.getVersion();
         Jwt admin = Jwt.withTokenValue("admin").header("alg", "none")
-            .claim("roles", List.of("Admin")).claim("oid", "admin-1").build();
+            .claim("roles", List.of("Admin")).claim("oid", "admin-1")
+            .claim("tid", "tenant-1").build();
         var changed = api.status(p.getId(), new OrderApiController.StatusInput("ACCEPTED", initial), admin);
         assertEquals("ACCEPTED", changed.status());
         assertEquals(initial + 1, changed.version());

@@ -32,6 +32,10 @@ spring:
 
   rabbitmq:
     connection-timeout: 2s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:pedidos360}
@@ -76,3 +80,5 @@ pedidos360:
       order-created: orders.created
       ticket-created: orders.created.ticket
       audit-created: orders.created.audit
+      status-changed: orders.status.changed
+      order-cancelled: orders.cancelled

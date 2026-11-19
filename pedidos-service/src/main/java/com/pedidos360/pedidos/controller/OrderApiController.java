@@ -1,6 +1,8 @@
 package com.pedidos360.pedidos.controller;
 
 import com.pedidos360.pedidos.inventory.OrderWriteService;
+import com.pedidos360.pedidos.messaging.OrderEventPublisher;
+import com.pedidos360.pedidos.model.OrderActor;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
@@ -40,10 +42,12 @@ public class OrderApiController {
     private final AuditEventRepository audit;
     private final CustomerDirectory directory;
     private final VerifiedOwnerMappingRepository mappings;
+    private final OrderEventPublisher publisher;
     public OrderApiController(PedidoRepository repository, OrderWriteService writer, AuditEventRepository audit,
-                              CustomerDirectory directory, VerifiedOwnerMappingRepository mappings) {
+                              CustomerDirectory directory, VerifiedOwnerMappingRepository mappings,
+                              OrderEventPublisher publisher) {
         this.repository = repository; this.writer = writer; this.audit = audit; this.directory = directory;
-        this.mappings = mappings;
+        this.mappings = mappings; this.publisher = publisher;
     }
 
     public record OrderItemInput(String productId, String name, Integer quantity, BigDecimal unitPrice) {}
@@ -113,9 +117,8 @@ public class OrderApiController {
     public OrderView create(@RequestBody OrderInput input, @AuthenticationPrincipal Jwt jwt) {
         validate(input, true);
         var owner = directory.resolve(input.customerId(), input.customerTenantId());
-        String actor = jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name");
         return view(writer.create(new OrderWriteService.Input(input.requestId(), null, input.detail(), items(input)),
-            owner, actor, actorEmail(jwt)));
+            owner, OrderActor.fromJwt(jwt)));
     }
 
     @PutMapping("/{id}")
@@ -177,13 +180,18 @@ public class OrderApiController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Estado histórico sin equivalencia"));
         if (!current.canTransitionTo(next))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Transición de estado inválida");
+        OrderActor actor = OrderActor.fromJwt(jwt);
+        OffsetDateTime changedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        PedidoStatusEvent change = new PedidoStatusEvent(current.name(), next.name(), changedAt, actor);
         p.setEstado(next.name());
-        p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-        p.getHistory().add(event(next.name(), jwt));
+        p.setUpdatedAt(changedAt);
+        p.getHistory().add(change);
         repository.saveAndFlush(p);
-        audit.save(new AuditEvent("order-status-" + p.getId() + "-" + p.getVersion(),
+        String auditKey = "order-status-" + p.getId() + "-" + p.getVersion();
+        audit.save(new AuditEvent(auditKey,
             next == OrderStatus.CANCELLED ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED",
-            "Pedido " + p.getId() + " pasó a " + next, actorEmail(jwt), OffsetDateTime.now()));
+            "Pedido " + p.getId() + " pasó de " + current + " a " + next, actor.email(), changedAt));
+        publisher.enqueueStatus(p, change, auditKey, actor.email());
         if (next == OrderStatus.CANCELLED && p.getReservationKey() != null) {
             Long orderId = p.getId();
             writer.markReleasePending(orderId);
@@ -231,9 +239,6 @@ public class OrderApiController {
     private String normalized(String s) {
         return OrderStatus.fromStored(s).map(Enum::name)
             .orElse(s == null || s.isBlank() ? "UNKNOWN" : s.strip().toUpperCase(java.util.Locale.ROOT));
-    }
-    private PedidoStatusEvent event(String status, Jwt jwt) {
-        return new PedidoStatusEvent(status, OffsetDateTime.now(ZoneOffset.UTC), jwt.getClaimAsString("name") == null ? jwt.getSubject() : jwt.getClaimAsString("name"), "Admin");
     }
     private String actorEmail(Jwt jwt) {
         String email = jwt.getClaimAsString("preferred_username");

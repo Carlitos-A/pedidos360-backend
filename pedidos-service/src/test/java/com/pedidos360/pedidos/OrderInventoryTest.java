@@ -6,6 +6,7 @@ import com.pedidos360.pedidos.inventory.InventoryClient;
 import com.pedidos360.pedidos.inventory.OrderWriteService;
 import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.PedidoItem;
+import com.pedidos360.pedidos.model.OrderActor;
 import com.pedidos360.pedidos.repository.PedidoRepository;
 import com.pedidos360.pedidos.repository.PendingInventoryReleaseRepository;
 import java.util.List;
@@ -30,6 +31,7 @@ class OrderInventoryTest {
     @MockitoBean InventoryClient inventory;
     @MockitoBean OrderEventPublisher publisher;
     private final Customer customer = new Customer("owner", "tenant", "Cliente", "cliente@example.test");
+    private final OrderActor actor = new OrderActor("admin-1", "tenant", "Admin", "Admin", "admin@example.test");
 
     @Test void totalYNombreProvienenDelCatalogoYReintentarNoDuplica() {
         String requestId = UUID.randomUUID().toString();
@@ -37,12 +39,16 @@ class OrderInventoryTest {
             .thenReturn(new InventoryClient.Quote(List.of(new InventoryClient.QuotedLine("7", "Real", 2, 150L)), 300L))
             .thenReturn(new InventoryClient.Quote(List.of(new InventoryClient.QuotedLine("7", "Real", 3, 150L)), 450L));
         var input = new OrderWriteService.Input(requestId, null, "Detalle", List.of(new PedidoItem("7", "Falso", 2, 99L)));
-        var created = writes.create(input, customer, "Admin", "admin@example.test");
+        var created = writes.create(input, customer, actor);
         assertEquals(300L, created.getTotalClp());
         assertEquals("Real", created.getItems().getFirst().getName());
         assertNotNull(created.getCreatedAtUtc());
         assertEquals("READY", created.getInventoryState());
-        assertEquals(created.getId(), writes.create(input, customer, "Admin", "admin@example.test").getId());
+        assertEquals(1, created.getHistory().size());
+        assertNull(created.getHistory().getFirst().getPreviousStatus());
+        assertEquals("admin-1", created.getHistory().getFirst().getActorId());
+        assertEquals("tenant", created.getHistory().getFirst().getActorTenantId());
+        assertEquals(created.getId(), writes.create(input, customer, actor).getId());
         verify(inventory, times(1)).reserve(eq(requestId), eq("owner"), eq("tenant"), anyList(), eq(true));
         var changed = writes.update(created.getId(), new OrderWriteService.Input(null, created.getVersion(), "Editado",
             List.of(new PedidoItem("7", "Falso", 3, 99L))), "owner", "tenant");
@@ -58,9 +64,9 @@ class OrderInventoryTest {
             .thenThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE))
             .thenReturn(new InventoryClient.Quote(List.of(new InventoryClient.QuotedLine("7", "Real", 1, 100L)), 100L));
         var input = new OrderWriteService.Input(requestId, null, "Detalle", List.of(new PedidoItem("7", "Real", 1, 100L)));
-        assertThrows(ResponseStatusException.class, () -> writes.create(input, customer, "Admin", "admin@example.test"));
+        assertThrows(ResponseStatusException.class, () -> writes.create(input, customer, actor));
         assertEquals("PENDING", orders.findByReservationKey(requestId).orElseThrow().getInventoryState());
-        var ready = writes.create(input, customer, "Admin", "admin@example.test");
+        var ready = writes.create(input, customer, actor);
         assertEquals("READY", ready.getInventoryState());
         assertEquals(1, orders.findByReservationKey(requestId).stream().count());
     }
@@ -72,11 +78,13 @@ class OrderInventoryTest {
         when(inventory.reserve(eq(requestId), anyString(), anyString(), eq(List.of()), eq(false)))
             .thenReturn(new InventoryClient.Quote(List.of(), 0L));
         var input = new OrderWriteService.Input(requestId, null, "Detalle", List.of(new PedidoItem("7", "Real", 1, 100L)));
-        var created = writes.create(input, customer, "Admin", "admin@example.test");
+        var created = writes.create(input, customer, actor);
         Jwt admin = Jwt.withTokenValue("admin").header("alg", "none")
-            .claim("roles", List.of("Admin")).claim("oid", "admin-1").build();
+            .claim("roles", List.of("Admin")).claim("oid", "admin-1").claim("tid", "tenant").build();
         var cancelled = api.status(created.getId(), new OrderApiController.StatusInput("CANCELLED", created.getVersion()), admin);
         assertEquals("CANCELLED", cancelled.status());
+        assertEquals("CREATED", cancelled.history().getFirst().getPreviousStatus());
+        assertEquals("admin-1", cancelled.history().getFirst().getActorId());
         verify(inventory).reserve(eq(requestId), eq("owner"), eq("tenant"), eq(List.of()), eq(false));
         assertFalse(releases.existsById(created.getId()));
         var current = orders.findById(created.getId()).orElseThrow();

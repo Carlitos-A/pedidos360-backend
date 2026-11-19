@@ -42,6 +42,9 @@ public class Pedido {
     private String inventoryState;
     private String requestActorName;
     private String requestActorEmail;
+    private String requestActorId;
+    private String requestActorTenantId;
+    private String requestActorRole;
 
     @Column(name = "customer_id")
     private String customerId;
@@ -121,6 +124,12 @@ public class Pedido {
     public void setRequestActorName(String value) { this.requestActorName = value; }
     public String getRequestActorEmail() { return requestActorEmail; }
     public void setRequestActorEmail(String value) { this.requestActorEmail = value; }
+    public String getRequestActorId() { return requestActorId; }
+    public void setRequestActorId(String value) { this.requestActorId = value; }
+    public String getRequestActorTenantId() { return requestActorTenantId; }
+    public void setRequestActorTenantId(String value) { this.requestActorTenantId = value; }
+    public String getRequestActorRole() { return requestActorRole; }
+    public void setRequestActorRole(String value) { this.requestActorRole = value; }
 
     public String getEstado() {
         return estado;

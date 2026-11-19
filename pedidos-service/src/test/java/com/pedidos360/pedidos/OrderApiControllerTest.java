@@ -2,6 +2,7 @@ package com.pedidos360.pedidos;
 
 import com.pedidos360.pedidos.controller.OrderApiController;
 import com.pedidos360.pedidos.inventory.OrderWriteService;
+import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.repository.PedidoRepository;
 import com.pedidos360.pedidos.repository.AuditEventRepository;
@@ -25,11 +26,11 @@ import static org.mockito.Mockito.*;
 class OrderApiControllerTest {
     private final PedidoRepository repository = mock(PedidoRepository.class);
     private final CustomerDirectory directory = mock(CustomerDirectory.class);
-    private final OrderApiController api = new OrderApiController(repository, mock(OrderWriteService.class), mock(AuditEventRepository.class), directory, mock(VerifiedOwnerMappingRepository.class));
+    private final OrderApiController api = new OrderApiController(repository, mock(OrderWriteService.class), mock(AuditEventRepository.class), directory, mock(VerifiedOwnerMappingRepository.class), mock(OrderEventPublisher.class));
     private final Jwt cliente = Jwt.withTokenValue("token").header("alg", "none")
         .claim("roles", List.of("Cliente")).claim("oid", "owner-1").claim("tid", "tenant-1").build();
     private final Jwt admin = Jwt.withTokenValue("admin").header("alg", "none")
-        .claim("roles", List.of("Admin")).claim("oid", "admin-1").build();
+        .claim("roles", List.of("Admin")).claim("oid", "admin-1").claim("tid", "tenant-1").build();
 
     @Test void clienteSoloVeSusPedidosYTotalNoFiltraOtros() {
         Pedido own = pedido(1L, "owner-1");
@@ -76,6 +77,7 @@ class OrderApiControllerTest {
         ReflectionTestUtils.setField(p, "version", 0L);
         when(repository.findById(4L)).thenReturn(Optional.of(p));
         assertEquals("DESPACHADO", api.get(4L, admin).status());
+        assertTrue(api.get(4L, admin).history().isEmpty());
         var error = assertThrows(ResponseStatusException.class,
             () -> api.status(4L, new OrderApiController.StatusInput("COMPLETED", 0L), admin));
         assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
@@ -89,6 +91,8 @@ class OrderApiControllerTest {
         assertEquals("ACCEPTED", result.status());
         assertEquals(0L, result.version());
         assertEquals("ACCEPTED", p.getEstado());
+        assertEquals("CREATED", result.history().getFirst().getPreviousStatus());
+        assertEquals("admin-1", result.history().getFirst().getActorId());
         verify(repository).saveAndFlush(p);
     }
 

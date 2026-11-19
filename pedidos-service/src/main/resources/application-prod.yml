@@ -33,6 +33,10 @@ spring:
 
   rabbitmq:
     connection-timeout: 2s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
     host: ${RABBITMQ_HOST}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME}
