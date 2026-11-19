@@ -37,6 +37,28 @@ detalle. PUT solo cambia los datos del pedido; no cambia su estado. El servidor
 asigna CREATED al crear. Las transiciones admitidas son CREATED a ACCEPTED o
 CANCELLED, ACCEPTED a IN_PROGRESS o CANCELLED, e IN_PROGRESS a COMPLETED o
 CANCELLED. COMPLETED y CANCELLED son terminales.
+
+Los pedidos nuevos requieren al menos un ítem. `POST /api/orders` recibe además
+`requestId` (UUID de idempotencia) y `PUT /api/orders/{id}` recibe
+`expectedVersion`; ambos aceptan el total mostrado por Angular, pero el servidor
+lo ignora. Productos confirma propietario, precio CLP entero y stock en
+`PUT /internal/reservations/{requestId}` y devuelve los nombres, precios y total
+que se guardan como snapshot. Repetir la misma reserva no descuenta dos veces;
+editar cantidades ajusta la diferencia y cancelar libera el stock. Si productos
+no responde, el pedido nuevo queda pendiente, invisible en la API pública, y
+un trabajo programado reintenta la confirmación. Las ediciones pendientes se
+reintentan del mismo modo; el estado y la reasignación quedan bloqueados mientras
+exista una edición pendiente.
+
+Configura el mismo `INTERNAL_SERVICE_KEY` no vacío en ambos servicios y
+`PRODUCTS_INTERNAL_URL` en pedidos (por ejemplo, `http://localhost:8082` en la
+EC2). La ruta `/internal/*` debe quedar fuera del API Gateway y de Internet;
+solo pedidos debe poder alcanzar el puerto 8082. La clave viaja por header
+entre servicios. La API pública de productos devuelve precios CLP enteros.
+El inventario y el pedido viven en bases distintas: la reserva es idempotente y
+los cambios pendientes se recuperan tras una caída; no hay una transacción SQL
+distribuida. Una cancelación confirma primero el estado y luego libera stock;
+si productos está caído, el trabajo programado vuelve a intentar la liberación.
 El rol Cliente recibe solo pedidos cuyos `customerId` y `customerTenantId`
 coinciden con `oid` y `tid` del access token. Los registros históricos sin
 propietario solo son visibles para Admin. `POST /pedidos` ya no se usa, pues
@@ -87,9 +109,15 @@ script lista los valores sin equivalencia para revisión y no los modifica.
 La API conserva esos valores y Angular los muestra como «SIN EQUIVALENCIA»;
 no permite avanzar el estado hasta resolverlos. No se deducen ACCEPTED ni
 CANCELLED a partir de datos antiguos.
-Los precios e ítems que llegan del navegador todavía necesitan cotejo con el
-catálogo y reglas de reserva de stock antes de tratar el total como importe
-autoritativo. El API Gateway aún debe enrutar `/api/orders/*` y
+Después de añadir las columnas nuevas, ejecutar
+[`2026-11-19-price-clp.sql`](productos-service/db/migrations/2026-11-19-price-clp.sql)
+en productosdb y
+[`2026-11-19-order-money.sql`](pedidos-service/db/migrations/2026-11-19-order-money.sql)
+en pedidosdb. Convierten solo importes enteros exactos; los fraccionarios se
+revisan manualmente. Los pedidos históricos con `fecha` sin zona conocida
+conservan ese dato, pero no reciben un `createdAt` inventado. Los pedidos nuevos
+guardan `created_at_utc` y responden fechas ISO 8601 UTC.
+El API Gateway aún debe enrutar `/api/orders/*` y
 `/api/products/*` a los puertos internos respectivos.
 
 | Servicio | Puerto | Endpoints |
@@ -161,7 +189,7 @@ cd pedidos-service
 ./mvnw.cmd spring-boot:run
 ```
 
-En otra terminal, desde `rabbit-admin-service`, ejecuta `..\pedidos-service\mvnw.cmd -f pom.xml spring-boot:run`. Al crear un pedido con `POST /pedidos`, los tres listeners lo procesan; se observan sus logs en la terminal del servicio y sus colas en la consola RabbitMQ.
+En otra terminal, desde `rabbit-admin-service`, ejecuta `..\pedidos-service\mvnw.cmd -f pom.xml spring-boot:run`. Arranca también `productos-service` y configura `INTERNAL_SERVICE_KEY` en ambos servicios. Al crear un pedido con `POST /api/orders`, los tres listeners procesan el evento; se observan sus logs en la terminal del servicio y sus colas en la consola RabbitMQ.
 
 ### API de administración
 
