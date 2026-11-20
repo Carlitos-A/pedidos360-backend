@@ -35,6 +35,8 @@ public class SecurityConfig {
 
     @Value("${app.cors.allowed-origins:http://localhost:4200}")
     private String allowedOrigins;
+    @Value("${app.security.require-write-scope:false}")
+    private boolean requireWriteScope;
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -50,11 +52,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**")
                     .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
                 .requestMatchers(HttpMethod.POST, "/api/products", "/api/products/**")
-                    .hasAuthority("APPROLE_Admin")
+                    .access(AdminWriteAuthorization.require(requireWriteScope))
                 .requestMatchers(HttpMethod.PUT, "/api/products/**")
-                    .hasAuthority("APPROLE_Admin")
+                    .access(AdminWriteAuthorization.require(requireWriteScope))
                 .requestMatchers(HttpMethod.PATCH, "/api/products/**")
-                    .hasAuthority("APPROLE_Admin")
+                    .access(AdminWriteAuthorization.require(requireWriteScope))
                 .anyRequest().denyAll())
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt
@@ -87,9 +89,9 @@ public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
+        config.setAllowedOrigins(java.util.Arrays.stream(allowedOrigins.split(",")).map(String::strip).toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;

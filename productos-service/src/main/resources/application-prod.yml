@@ -41,6 +41,7 @@ app:
     key: ${INTERNAL_SERVICE_KEY:}
   security:
     audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+    require-write-scope: ${REQUIRE_WRITE_SCOPE:false}
   cors:
-    # URL del frontend en S3 (variable de entorno en el EC2)
-    allowed-origins: ${FRONT_URL:http://localhost:4200}
+    # Origen de GitHub Pages, sin la ruta del repositorio.
+    allowed-origins: ${FRONT_URL:https://carlitos-a.github.io}
