@@ -2,30 +2,91 @@
 
 Microservicios Spring Boot del sistema Pedidos360 (EP1 · DSY1107).
 
+## Auditoría en Kafka (código preparado)
+
+`audit-service` consume `pedidos360.audit.v1` y persiste su propia tabla
+`audit_event`. Expone el mismo contrato `GET /api/audit/events` que usa Angular,
+con filtros y paginación en SQL, orden `occurredAt DESC, id DESC`, fechas
+inclusivas en `America/Santiago` y acceso exclusivo para Admin. En producción
+usa MySQL `auditdb`; localmente usa H2. El JAR se compila con
+`mvn -f audit-service/pom.xml package`.
+
+`pedidos-service` conserva RabbitMQ para notificación y ticket. Sus eventos de
+auditoría se colocan en el outbox transaccional existente. `productos-service`
+usa su outbox de auditoría y registra el destino al crear cada entrada. Con
+`AUDIT_KAFKA_ENABLED=false` (valor inicial) ambos publican por RabbitMQ; con
+`true` publican en Kafka y esperan confirmación antes de retirar el outbox.
+Una entrada pendiente conserva su destino aunque cambie el flag. Los eventos
+Kafka contienen `schemaVersion`, `eventId`, `type`, `entityId`, `occurredAt`
+UTC y actor; cambios de estado incluyen `previousStatus` y `status`. No se
+incluyen nombre, detalle ni ítems del pedido. El consumidor usa `eventId` único
+para deduplicar. Los mensajes inválidos se confirman solo tras publicarse en
+`pedidos360.audit.dlt.v1`; fallos de base o de DLT se reintentan sin saltar el
+offset. `pedidos360.login.v1` está reservado para inicios de sesión de Entra.
+Un adaptador opcional de `audit-service` consulta Microsoft Graph por inicios
+interactivos exitosos de la SPA y publica `USER_LOGIN` con el ID de registro de
+Entra como clave estable. Conserva un cursor en MySQL, reconsulta una ventana
+solapada y no lo avanza si falla la publicación. Angular no emite login.
+
+Variables compartidas: `KAFKA_BOOTSTRAP_SERVERS`, `AUDIT_KAFKA_ENABLED` y
+`AUDIT_KAFKA_TOPIC`. `audit-service` acepta `AUDIT_LOGIN_TOPIC`,
+`AUDIT_DLT_TOPIC`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` y
+`FRONT_URL`. `INTERNAL_SERVICE_KEY` protege `/internal/health`; cuando
+`pedidos-service` recibe `AUDIT_SERVICE_URL` con la URL interna de ese endpoint,
+`/api/health` consulta al nuevo servicio en vez de la auditoría antigua.
+No enrutar `/internal/health` en API Gateway ni exponer el puerto 8084 a Internet.
+El perfil `prod` configura `SASL_SSL`/`AWS_MSK_IAM`; las
+credenciales provienen del rol de ejecución AWS. Los clientes de pedidos y
+productos necesitan escribir en el tópico de auditoría; audit-service necesita
+leer los tópicos de auditoría y login con su grupo, y escribir en DLT. El
+frontend nunca se conecta a Kafka.
+
+El adaptador de login permanece desactivado (`ENTRA_SIGNINS_ENABLED=false`).
+Para activarlo se requieren `ENTRA_TENANT_ID`, `ENTRA_SPA_APP_ID`,
+`GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` y el permiso de aplicación de Microsoft
+Graph `AuditLog.Read.All` con consentimiento administrativo. Microsoft Graph
+exige licencia Entra ID P1 o P2 para descargar sign-ins. Se pueden ajustar
+`ENTRA_INITIAL_LOOKBACK_HOURS` y `ENTRA_SIGNIN_OVERLAP_HOURS` (24 h por defecto);
+la disponibilidad histórica depende de la retención de los registros Entra.
+
+Antes del corte de ruta, aplicar
+[`2026-11-20-product-audit-identity.sql`](productos-service/db/migrations/2026-11-20-product-audit-identity.sql)
+en `productosdb` y
+[`2026-11-20-audit-service.sql`](audit-service/db/migrations/2026-11-20-audit-service.sql)
+en `auditdb` de la misma instancia MySQL. La segunda migración copia eventos
+legados usando `event_key` como `eventId`; repetir la copia tras activar ambos
+productores y antes de dirigir `/api/audit/events` al nuevo servicio. La
+inserción ignora claves ya copiadas. Configurar la sesión MySQL en UTC durante
+la copia y verificar conteos antes del corte. La retención de la base se activa
+con `AUDIT_RETENTION_DAYS`; el valor inicial `0` no elimina datos hasta definir
+la política. La retención del tópico Kafka se configura por separado.
+
 ## Microservicios
 
 ### Contrato `/api/*` para Angular
 
 La vista Admin de reportes y auditoría y el panel de estado ya existen en el
-frontend. Por ahora sus endpoints viven en `pedidos-service`, junto a la base
-de datos de pedidos: `GET /api/reports/{kpis,sales,lead-time,top-products}`,
-`GET /api/audit/events` y `GET /api/health`. El Gateway debe dirigir también
-esas rutas a `pedidos-service:8081`. Todos requieren rol Admin.
+frontend. Reportes y salud viven en `pedidos-service`:
+`GET /api/reports/{kpis,sales,lead-time,top-products}` y `GET /api/health`.
+`GET /api/audit/events` sigue disponible en `pedidos-service` durante la
+migración; después del corte, el Gateway debe dirigirlo a `audit-service:8084`.
+Todos requieren rol Admin.
 
 Los reportes cuentan pedidos completados para ventas y excluyen cancelados.
 `activeUsers` queda `null` porque no hay fuente confiable; el lead time solo se
 calcula si existe un evento COMPLETED persistido. Auditoría guarda creación y
 cambios de estado de pedidos en la misma base de datos. Productos publica
 actualizaciones en RabbitMQ (`products.updated.audit`) desde un outbox local
-con reintentos y el consumidor de pedidos las persiste; ambos servicios deben
-usar el mismo broker. `USER_LOGIN` no se emite porque aún no existe un evento
-de autenticación confiable.
+con reintentos mientras `AUDIT_KAFKA_ENABLED=false`. El código Kafka se describe
+en la sección «Auditoría en Kafka».
 
 `/api/health` informa `bff: DOWN` porque no hay BFF. `orders` y `report`
 comprueban la base de datos local; `products` comprueba que el servicio
-protegido responde 401 sin token; `audit` comprueba base de datos y RabbitMQ.
-Los nombres `report` y `audit` representan módulos dentro de pedidos, no
-procesos independientes.
+protegido responde 401 sin token. Con `AUDIT_SERVICE_URL`, `audit` consulta
+la salud interna de `audit-service`; sin esa URL conserva la comprobación
+anterior de base de datos y RabbitMQ.
+`report` sigue siendo un módulo dentro de pedidos. `audit-service` es un
+proceso independiente preparado para el corte a Kafka.
 
 `pedidos-service` expone `GET/POST /api/orders`, `GET/PUT /api/orders/{id}` y
 `PATCH /api/orders/{id}/status`. La lista acepta `status`, `q`, `from`, `to`,
@@ -125,6 +186,7 @@ El API Gateway aún debe enrutar `/api/orders/*` y
 | `pedidos-service` | 8081 | `/api/orders`, `/api/reports/*`, `/api/audit/events`, `/api/health` |
 | `productos-service` | 8082 | `/api/products`, `/api/products/{id}/stock` |
 | `rabbit-admin-service` | 8083 | `GET /admin/health`, gestión REST de colas, exchanges y bindings |
+| `audit-service` | 8084 | `GET /api/audit/events`, `GET /internal/health` |
 
 ## Requisitos
 
