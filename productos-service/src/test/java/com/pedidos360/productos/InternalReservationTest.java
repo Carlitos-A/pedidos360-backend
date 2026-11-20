@@ -37,7 +37,7 @@ class InternalReservationTest {
         var input = new com.pedidos360.productos.controller.ProductApiController.ProductInput(
             "A", "B", new BigDecimal("100.5"), 1, "owner", "tenant");
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
-            () -> controller.create(input)).getStatusCode());
+            () -> controller.create(input, null)).getStatusCode());
     }
 
     @Test @Transactional void reservaEsIdempotenteYAjustaDeltas() {

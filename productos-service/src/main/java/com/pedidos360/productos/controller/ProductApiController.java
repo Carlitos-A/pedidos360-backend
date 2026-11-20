@@ -40,11 +40,13 @@ public class ProductApiController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
-    public ProductView create(@RequestBody ProductInput input) {
+    public ProductView create(@RequestBody ProductInput input, @AuthenticationPrincipal Jwt jwt) {
         validate(input);
         Producto p = new Producto();
         apply(p, input);
-        return view(repository.saveAndFlush(p));
+        repository.saveAndFlush(p);
+        audit.updated(p, jwt);
+        return view(p);
     }
 
     @PutMapping("/{id}")
@@ -54,7 +56,7 @@ public class ProductApiController {
         Producto p = find(id);
         apply(p, input);
         repository.saveAndFlush(p);
-        audit.updated(p, email(jwt));
+        audit.updated(p, jwt);
         return view(p);
     }
 
@@ -68,7 +70,7 @@ public class ProductApiController {
         if (next < 0 || next > Integer.MAX_VALUE) throw new ResponseStatusException(HttpStatus.CONFLICT, "Stock fuera de rango");
         p.setStock((int) next);
         repository.saveAndFlush(p);
-        audit.updated(p, email(jwt));
+        audit.updated(p, jwt);
         return view(p);
     }
     private Producto find(Long id) { return repository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND)); }
@@ -87,9 +89,5 @@ public class ProductApiController {
     private boolean integerClp(BigDecimal price) {
         try { return price.signum() >= 0 && price.longValueExact() <= 9_007_199_254_740_991L; }
         catch (ArithmeticException ex) { return false; }
-    }
-    private String email(Jwt jwt) {
-        String value = jwt.getClaimAsString("preferred_username");
-        return value == null ? jwt.getClaimAsString("email") : value;
     }
 }
