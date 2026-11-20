@@ -152,6 +152,38 @@ mvnw.cmd spring-boot:run
 - Sin token → 401 · sin permiso → 403.
 - CORS habilitado para `http://localhost:4200` en desarrollo; en producción se configura con `FRONT_URL` (el sitio de GitHub Pages).
 
+### CORS, rutas y scope de escritura
+
+El origen de GitHub Pages es `https://carlitos-a.github.io` (sin la ruta del
+repositorio). `pedidos-service` y `productos-service` aceptan GET, POST, PUT,
+PATCH y OPTIONS con `Authorization` y `Content-Type`. En producción, `FRONT_URL`
+puede sobrescribir ese origen; para varios orígenes usa una lista separada por
+comas. El API Gateway necesita su propia configuración CORS. Con un perfil AWS
+CLI autorizado, ejecuta [`configure-api-gateway-cors.ps1`](scripts/configure-api-gateway-cors.ps1)
+para conservar los orígenes actuales y añadir PUT/PATCH y los dos headers.
+
+Después, revisa las rutas de la HTTP API `4r80bd3omi` en `us-east-1`: POST
+`/api/orders`, PUT `/api/orders/{id}`, PATCH `/api/orders/{id}/status`, PATCH
+`/api/orders/{id}/owner`, POST `/api/orders/ownership-migration`, POST
+`/api/products`, PUT `/api/products/{id}` y PATCH
+`/api/products/{id}/stock`. Cada ruta debe apuntar a la integración interna de
+su servicio y usar el JWT authorizer; la ruta `/internal/*` no debe publicarse.
+El script solo modifica CORS porque no puede deducir con seguridad las
+integraciones y el authorizer de rutas que aún no se han inspeccionado en AWS.
+
+Para exigir el permiso delegado, expón `pedidos.write` en la App Registration
+de la API, añádelo como permiso delegado de la SPA y concede consentimiento.
+Configura `pedidos.write` como único scope de autorización en las rutas de
+escritura del gateway y conserva `pedidos.read` en GET. API Gateway acepta una
+coincidencia con **cualquiera** de los scopes de una ruta; incluir ambos en
+una ruta de escritura permitiría entrar con solo lectura. Una vez que Entra y
+el gateway estén listos, activa `REQUIRE_WRITE_SCOPE=true` en pedidos y
+productos. Así, cada POST/PUT/PATCH exige simultáneamente rol `Admin` y
+`scp` con `pedidos.write`. Hasta esa activación sigue exigiendo rol `Admin`.
+Angular pide `pedidos.read` para iniciar sesión y GET, y `pedidos.write` solo
+para métodos de escritura. Un Cliente podría recibir el scope delegado de la
+SPA, pero su rol sigue bloqueando las escrituras.
+
 ## Base de datos
 
 RDS MySQL en producción y H2 en memoria para desarrollo, con credenciales por variables de entorno.
