@@ -2,6 +2,15 @@ server:
   port: 8081
 
 spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
   jackson:
     deserialization:
       accept-float-as-int: false
@@ -50,6 +59,11 @@ spring:
 
 # Audience esperada: el Application ID URI de la app "Pedidos360-API"
 app:
+  audit:
+    kafka-enabled: ${AUDIT_KAFKA_ENABLED:false}
+    topic: ${AUDIT_KAFKA_TOPIC:pedidos360.audit.v1}
+  health:
+    audit-url: ${AUDIT_SERVICE_URL:}
   internal:
     key: ${INTERNAL_SERVICE_KEY:}
   products:

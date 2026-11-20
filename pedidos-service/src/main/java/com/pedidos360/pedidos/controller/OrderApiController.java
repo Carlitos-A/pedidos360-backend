@@ -139,8 +139,10 @@ public class OrderApiController {
         p.setCustomerId(owner.id()); p.setCustomerTenantId(owner.tenantId()); p.setCliente(owner.name());
         p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         repository.saveAndFlush(p);
-        audit.save(new AuditEvent("order-owner-" + p.getId() + "-" + p.getVersion(), "ORDER_OWNER_CHANGED",
+        String auditKey = "order-owner-" + p.getId() + "-" + p.getVersion();
+        audit.save(new AuditEvent(auditKey, "ORDER_OWNER_CHANGED",
             "Propietario del pedido " + p.getId() + " reasignado", actorEmail(jwt), OffsetDateTime.now()));
+        publisher.enqueueOwnerChanged(p, auditKey, OrderActor.fromJwt(jwt));
         return view(p);
     }
 
@@ -159,8 +161,10 @@ public class OrderApiController {
             p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             repository.saveAndFlush(p);
             mappings.save(new VerifiedOwnerMapping(p.getId(), owner.id(), owner.tenantId(), actorEmail(jwt), OffsetDateTime.now()));
-            audit.save(new AuditEvent("order-owner-migrated-" + p.getId(), "ORDER_OWNER_CHANGED",
+            String auditKey = "order-owner-migrated-" + p.getId();
+            audit.save(new AuditEvent(auditKey, "ORDER_OWNER_CHANGED",
                 "Propietario histórico del pedido " + p.getId() + " verificado", actorEmail(jwt), OffsetDateTime.now()));
+            publisher.enqueueOwnerChanged(p, auditKey, OrderActor.fromJwt(jwt));
         }
         return Map.of("migrated", input.size());
     }

@@ -19,10 +19,15 @@ public class HealthController {
     private final AuditEventRepository audit;
     private final RabbitTemplate rabbit;
     private final URI productsUrl;
+    private final String auditUrl;
+    private final String auditInternalKey;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     public HealthController(PedidoRepository orders, AuditEventRepository audit, RabbitTemplate rabbit,
-                            @Value("${app.health.products-url:http://localhost:8082/api/products}") URI productsUrl) {
+                            @Value("${app.health.products-url:http://localhost:8082/api/products}") URI productsUrl,
+                            @Value("${app.health.audit-url:}") String auditUrl,
+                            @Value("${app.internal.key:}") String auditInternalKey) {
         this.orders = orders; this.audit = audit; this.rabbit = rabbit; this.productsUrl = productsUrl;
+        this.auditUrl = auditUrl; this.auditInternalKey = auditInternalKey;
     }
     public record Entry(String name, String status) {}
     public record Result(List<Entry> services) {}
@@ -31,10 +36,10 @@ public class HealthController {
         String local = databaseUp() ? "UP" : "DOWN";
         return new Result(List.of(new Entry("bff", "DOWN"), new Entry("orders", local),
             new Entry("products", productsUp() ? "UP" : "DOWN"),
-            new Entry("report", local), new Entry("audit", "UP".equals(local) && brokerUp() ? "UP" : "DOWN")));
+            new Entry("report", local), new Entry("audit", auditUp() ? "UP" : "DOWN")));
     }
     private boolean databaseUp() {
-        try { orders.count(); audit.count(); return true; } catch (Exception e) { return false; }
+        try { orders.count(); return true; } catch (Exception e) { return false; }
     }
     private boolean productsUp() {
         try {
@@ -46,5 +51,17 @@ public class HealthController {
     private boolean brokerUp() {
         try { return Boolean.TRUE.equals(rabbit.execute(channel -> channel.isOpen())); }
         catch (Exception e) { return false; }
+    }
+    private boolean auditUp() {
+        if (auditUrl.isBlank()) {
+            try { audit.count(); return databaseUp() && brokerUp(); }
+            catch (Exception e) { return false; }
+        }
+        if (auditInternalKey.isBlank()) return false;
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(auditUrl))
+                .timeout(Duration.ofSeconds(5)).header("X-Internal-Key", auditInternalKey).GET().build();
+            return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() == 200;
+        } catch (Exception e) { return false; }
     }
 }
