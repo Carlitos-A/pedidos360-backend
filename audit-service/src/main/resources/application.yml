@@ -1,0 +1,56 @@
+server:
+  port: 8084
+spring:
+  application:
+    name: audit-service
+  datasource:
+    url: jdbc:h2:mem:auditdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+    hibernate:
+      ddl-auto: update
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: pedidos360-audit
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+app:
+  internal:
+    key: ${INTERNAL_SERVICE_KEY:}
+  security:
+    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+  audit:
+    kafka-enabled: ${AUDIT_KAFKA_ENABLED:false}
+    retention-days: ${AUDIT_RETENTION_DAYS:0}
+    topic: ${AUDIT_KAFKA_TOPIC:pedidos360.audit.v1}
+    login-topic: ${AUDIT_LOGIN_TOPIC:pedidos360.login.v1}
+    dlt-topic: ${AUDIT_DLT_TOPIC:pedidos360.audit.dlt.v1}
+    group-id: pedidos360-audit
+  entra:
+    signins-enabled: ${ENTRA_SIGNINS_ENABLED:false}
+    tenant-id: ${ENTRA_TENANT_ID:}
+    graph-client-id: ${GRAPH_CLIENT_ID:}
+    graph-client-secret: ${GRAPH_CLIENT_SECRET:}
+    spa-app-id: ${ENTRA_SPA_APP_ID:}
+    initial-lookback-hours: ${ENTRA_INITIAL_LOOKBACK_HOURS:24}
+    overlap-hours: ${ENTRA_SIGNIN_OVERLAP_HOURS:24}
