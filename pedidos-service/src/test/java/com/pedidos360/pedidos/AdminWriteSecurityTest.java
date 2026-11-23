@@ -112,4 +112,29 @@ class AdminWriteSecurityTest {
             .with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Admin"))))
             .andExpect(status().isOk());
     }
+
+    @Test void clienteSeRegistraConSuJwtYAdminPuedeBuscarlo() throws Exception {
+        String id = "11111111-1111-1111-1111-111111111111";
+        String tenant = "bb5324af-c266-41ed-b36c-a971641c7af2";
+        mvc.perform(post("/api/customers/me"))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/customers/me")
+            .with(jwt().jwt(token -> token.claim("roles", java.util.List.of("Admin", "Cliente"))
+                .claim("oid", id).claim("tid", tenant))
+                .authorities(new SimpleGrantedAuthority("APPROLE_Admin"),
+                    new SimpleGrantedAuthority("APPROLE_Cliente"))))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/api/customers/me")
+            .with(jwt().jwt(token -> token.claim("roles", java.util.List.of("Cliente"))
+                .claim("oid", id).claim("tid", tenant).claim("name", "María Ejemplo")
+                .claim("preferred_username", "maria@example.test").claim("scp", "pedidos.read"))
+                .authorities(new SimpleGrantedAuthority("APPROLE_Cliente"))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.tenantId").value(tenant));
+        mvc.perform(get("/api/customers").param("q", "María")
+            .with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Admin"))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(id));
+    }
 }
