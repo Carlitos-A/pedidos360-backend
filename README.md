@@ -2,6 +2,256 @@
 
 Microservicios Spring Boot del sistema Pedidos360 (EP1 · DSY1107).
 
+Para un despliegue nuevo de las seis APIs y las cuatro bases, seguir
+[`docs/aws-code-deploy.md`](docs/aws-code-deploy.md). Ese flujo usa Flyway
+en producción y `ddl-auto: validate`; los SQL fechados de `db/migrations`
+son únicamente para actualizar instalaciones históricas.
+
+## Perfiles para el nuevo despliegue
+
+`prod` configura RDS, Entra y CORS con variables obligatorias; no selecciona
+el transporte Kafka. Activar **exactamente uno** de los perfiles `msk` o
+`kafka-compose` en los cinco servicios que usan Kafka (`pedidos`, `productos`,
+`audit`, `report`, `kafka-admin`). `msk` usa `SASL_SSL` y `AWS_MSK_IAM`;
+`kafka-compose` usa `PLAINTEXT` y tres brokers. Para desarrollo local basta
+`kafka-compose`; para RDS junto al clúster Compose usar `prod,kafka-compose`;
+para Amazon MSK usar `prod,msk`. En `prod`, definir `KAFKA_BOOTSTRAP_SERVERS`.
+
+| Variable de backend | Uso |
+|---|---|
+| `ENTRA_TENANT_ID` | Issuer JWT y directorio de clientes |
+| `ENTRA_API_AUDIENCE` | Valor exacto esperado en `aud` (por ejemplo `api://<id>`) |
+| `FRONT_URL` | Origen de la SPA para CORS, sin ruta de repositorio |
+| `KAFKA_BOOTSTRAP_SERVERS` | Brokers anunciados y alcanzables desde el proceso Java |
+| `INTERNAL_SERVICE_KEY`, `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `GRAPH_CLIENT_SECRET` | Secretos suministrados fuera de Git |
+
+Los valores de Entra antiguos permanecen como valores de desarrollo en
+`application.yml`; los perfiles `prod` requieren los identificadores del nuevo
+tenant y API. `REQUIRE_WRITE_SCOPE` vale `true` por defecto en producción para
+pedidos y productos: POST/PUT/PATCH exigen rol `Admin` **y** `pedidos.write` en
+el claim `scp` del access token. GET conserva `pedidos.read` en la configuración
+del frontend. Antes de habilitar escrituras en el gateway, exponer y conceder
+`pedidos.write` en Entra, comprobar un token real con `aud`, `roles` y `scp`, y
+probar 403 para Admin sin scope y Cliente con scope. Las pruebas de seguridad
+automatizadas cubren esas dos negativas y el Admin con scope.
+
+El clúster de evaluación de [Docker Compose](docker-compose.kafka.yml) contiene
+tres ZooKeeper, tres brokers con réplicas e ISR 2 y Kafka-UI. Los listeners internos anuncian
+`broker1:29092,broker2:29092,broker3:29092`; usar esos nombres desde otros
+contenedores de `pedidos360-messaging`. Para procesos Java fuera de Docker en el mismo host,
+usar `localhost:9092,localhost:9093,localhost:9094` con el perfil
+`kafka-compose`. Si el host de brokers es otro equipo privado, configurar
+`KAFKA_BIND_ADDRESS` y `KAFKA_ADVERTISED_HOST` con su IP privada y restringir
+9092–9094 al Security Group de los servicios. No publicar esos listeners
+PLAINTEXT en Internet.
+
+```powershell
+docker compose -f docker-compose.kafka.yml up -d --wait
+docker compose -f docker-compose.kafka.yml ps
+docker compose -f docker-compose.kafka.yml exec -e KAFKA_BOOTSTRAP_SERVERS=broker1:29092,broker2:29092,broker3:29092 -e KAFKA_TOPICS_BIN=kafka-topics -e KAFKA_CONFIGS_BIN=kafka-configs broker1 bash /opt/pedidos360/kafka/apply-topics.sh
+```
+
+Compose usa Confluent Platform 7.9 porque conserva ZooKeeper; es una topología
+de evaluación en un solo host. Para un despliegue nuevo administrado usar MSK.
+
+## Contratos OpenAPI
+
+Cada servicio genera su contrato OpenAPI 3 en `GET /v3/api-docs` y una interfaz
+Swagger en `/swagger-ui.html`. El contrato incluye modelos de solicitud y
+respuesta, Bearer JWT y los códigos de autorización `401`/`403`. El código
+`409` se documenta en las operaciones que pueden producir un conflicto de
+inventario, versión, transición, stock o nombre de tópico.
+Las anotaciones de cada controlador explican restricciones de roles, propiedad,
+filtros y cambios de estado. Para probar las rutas protegidas en Swagger UI,
+usar **Authorize** con un access token emitido para esta API.
+
+| Servicio | Puerto local | Rutas documentadas |
+|---|---:|---|
+| `pedidos-service` | 8081 | `/api/**`, incluidos pedidos, clientes, avisos, comprobantes, health y rutas heredadas marcadas como obsoletas |
+| `productos-service` | 8082 | `/api/products` y `/api/products/**` |
+| `rabbit-admin-service` | 8083 | `/admin/**` |
+| `audit-service` | 8084 | `/api/audit/**` |
+| `report-service` | 8085 | `/api/reports/**` |
+| `kafka-admin-service` | 8086 | `/internal/kafka/**` |
+
+En `kafka-admin-service`, Swagger también declara `X-Internal-Key`: la llamada
+requiere esa clave **y** el JWT Admin. Los contratos de los administradores se
+consultan dentro de la red privada. En AWS, mantener `/v3/api-docs` y
+`/swagger-ui/**` fuera de las rutas públicas del API Gateway; la SPA usa las
+rutas `/api/*` del gateway, nunca los puertos de los servicios.
+
+## Avisos y comprobantes opcionales
+
+`pedidos-service` procesa los eventos RabbitMQ v2 de creación en dos consumidores
+independientes. El de notificaciones guarda un aviso visible para el Cliente en
+el Dashboard; el de tickets guarda un comprobante de creación con número
+`P360-{orderId}`, fecha, ítems, precios y total CLP del snapshot confirmado por
+el servidor. Es un comprobante interno, no una boleta tributaria ni un email.
+La creación del pedido no espera a estos consumidores: el outbox publica de
+forma asíncrona y RabbitMQ conserva mensajes mientras no se consuman.
+
+`GET /api/notifications?page=0&pageSize=20` entrega avisos paginados. Cliente
+solo ve avisos cuyo destinatario **y propietario actual del pedido** coinciden
+con `oid` y `tid` de su JWT; Admin puede inspeccionar todos. `GET
+/api/orders/{id}/ticket` entrega el comprobante a Admin o al Cliente que sigue
+siendo propietario y destinatario original. La UI ofrece actualización manual
+de avisos y botones para consultar o descargar el comprobante en texto; un 404 indica que el ticket
+todavía no está disponible o no pertenece al usuario. El gateway de AWS debe
+enrutar `/api/notifications` a `pedidos-service` junto a `/api/orders/*`.
+
+Cada consumidor deduplica por `eventId` con restricción única en base de datos;
+el ticket también es único por pedido. Confirma RabbitMQ solo después de guardar.
+Un evento histórico v1 o incompleto va a la DLQ correspondiente, sin inventar
+dueño, ítems ni precio. Un fallo transitorio se intenta 3 veces con 500 ms de
+pausa y luego va a DLQ; ajustar con `OPTIONAL_WORK_RETRY_ATTEMPTS` y
+`OPTIONAL_WORK_RETRY_DELAY_MS`. El lector de DLQ documentado abajo registra
+esos rechazos. Antes de activar `OPTIONAL_WORK_ENABLED=true` en producción,
+aplicar [`2026-11-21-optional-order-work.sql`](pedidos-service/db/migrations/2026-11-21-optional-order-work.sql)
+en `pedidosdb`. El valor inicial es `false` para permitir el corte de base y
+gateway. Los pedidos anteriores requieren una reconstrucción verificada; no se
+generan comprobantes históricos a partir de campos incompletos.
+
+## Recuperación y registro de rechazos
+
+Los consumidores de auditoría y reportes envían eventos inválidos a sus DLT
+respectivos conservando el payload original. Cada registro DLT incluye los
+encabezados `pedidos360.dlt.source-topic`, `source-partition`, `source-offset`,
+`cause` y `rejected-at` (UTC ISO 8601). El offset de origen se confirma **solo**
+después de que Kafka confirme la escritura en DLT. Un fallo de base de datos o
+de la publicación DLT reintenta el mismo offset cada segundo, sin límite y sin
+saltarlo; `AUDIT_RETRY_DELAY_MS` y `REPORT_RETRY_DELAY_MS` ajustan la pausa.
+Por ello una partición queda detenida mientras persista el fallo y debe alertarse
+operativamente por lag del grupo y errores del servicio.
+
+`audit-service` puede consumir ambos DLT con el grupo independiente
+`pedidos360-dlt-monitor` (`AUDIT_DLT_MONITOR_ENABLED=true`). Guarda tópico,
+partición y offset DLT, origen, causa, fecha y SHA-256 del payload en `auditdb`,
+sin copiar su contenido a la tabla. La clave de posición evita registros
+duplicados tras redelivery; si falla la base no confirma el offset. Aplicar
+[`2026-11-21-rejected-kafka.sql`](audit-service/db/migrations/2026-11-21-rejected-kafka.sql)
+antes de activarlo en producción y conceder lectura de ambas DLT al rol MSK.
+`GET /internal/rejections/kafka?page=0&pageSize=20` permite inspección paginada
+solo a Admin; no crearle una ruta pública en API Gateway.
+
+`pedidos-service` puede consumir las tres DLQ RabbitMQ existentes con
+`RABBIT_DLQ_MONITOR_ENABLED=true`. Confirma cada mensaje después de registrar
+cola, origen, motivo `x-death`, `messageId`, fecha y SHA-256 en `pedidosdb`.
+Si falla el registro, reencola en la misma DLQ después de una pausa de un
+segundo. El lector **vacía** las DLQ al registrar; el contenido original no se
+guarda en la tabla ni se reenvía automáticamente. Aplicar
+[`2026-11-21-rejected-rabbit.sql`](pedidos-service/db/migrations/2026-11-21-rejected-rabbit.sql)
+antes de activarlo en producción. `GET /internal/rejections/rabbit?page=0&pageSize=20`
+es exclusivo de Admin y debe quedar en la red interna. Para recuperar el cuerpo
+de un rechazo Kafka se usa `kafka/inspect-dlt.sh TOPICO PARTICION OFFSET` desde
+un host privado con Kafka CLI y permisos de lectura; su salida contiene el
+payload original y debe tratarse como dato sensible. Los registros persistidos
+sirven para diagnóstico y trazabilidad, no para replay automático.
+
+## Topología Kafka reproducible
+
+### Administración interna
+
+`kafka-admin-service` (puerto 8086) usa Kafka AdminClient y ofrece:
+
+| Método | Ruta | Acción |
+| --- | --- | --- |
+| GET | `/internal/kafka/topics` | Lista nombres, particiones y réplicas |
+| GET | `/internal/kafka/topics/{name}` | Detalle, réplicas en sincronía y configuraciones no sensibles |
+| POST | `/internal/kafka/topics` | Crea un tópico con particiones, réplicas, retención y limpieza |
+| PATCH | `/internal/kafka/topics/{name}` | Aumenta particiones o cambia retención/limpieza |
+| DELETE | `/internal/kafka/topics/{name}` | Elimina un tópico solo con `KAFKA_ADMIN_ALLOW_DELETE=true` |
+| GET | `/internal/kafka/groups` | Lista grupos y estado |
+| GET | `/internal/kafka/groups/{groupId}` | Muestra miembros, asignaciones y offsets confirmados |
+
+Cada ruta exige simultáneamente un JWT válido para la API con rol `Admin` y
+`X-Internal-Key` igual a `INTERNAL_SERVICE_KEY` no vacío. Mantener 8086 en red
+privada; **no crear rutas públicas en API Gateway** hacia `/internal/kafka/*`.
+Para AWS MSK, el perfil `prod` usa IAM y necesita permisos Kafka de descripción,
+creación y modificación de tópicos y lectura de grupos; la eliminación requiere
+permiso adicional y el flag explícito. El servicio no reinicia offsets ni altera
+asignaciones de grupos activos. El manifiesto siguiente sigue siendo la fuente
+reproducible de la topología; la API permite inspección y cambios controlados.
+La imagen se construye con `docker build -t pedidos360-kafka-admin ./kafka-admin-service`;
+el Dockerfile no publica puertos del host. En AWS, desplegarlo sin IP pública ni
+listener público, con grupo de seguridad que permita 8086 solo desde la red de
+operación y acceso saliente a MSK y a Microsoft Entra para validar JWT. Inyectar
+`INTERNAL_SERVICE_KEY` desde Secrets Manager y no compartirlo con Angular.
+
+El manifiesto [`kafka/topics.csv`](kafka/topics.csv) declara los **dos tópicos
+principales** y los tópicos auxiliares. Se aplica con
+[`kafka/apply-topics.sh`](kafka/apply-topics.sh) desde una máquina con clientes
+Kafka y acceso privado a los brokers:
+
+```bash
+KAFKA_BOOTSTRAP_SERVERS=broker1:9092,broker2:9092,broker3:9092 bash kafka/apply-topics.sh
+```
+
+Para un clúster con autenticación se pasa `KAFKA_COMMAND_CONFIG` con la ruta a
+las propiedades del cliente Kafka. El script crea los tópicos ausentes,
+actualiza retención y política de limpieza y **falla** si un tópico existente
+tiene otro número de particiones o réplicas; no redistribuye uno activo.
+Requiere tres brokers disponibles porque todos los tópicos declaran factor de
+réplica 3. Las credenciales y las direcciones reales se aportan en el entorno,
+no en el repositorio.
+Para inspeccionar desde el mismo host privado se usa
+`kafka/inspect-kafka.sh topics`, `topic NOMBRE`, `groups` o `group ID` con las
+mismas variables de conexión. Los scripts no publican endpoints.
+
+| Tópico | Propósito | Particiones | Réplicas | Retención | Grupo lector |
+| --- | --- | ---: | ---: | ---: | --- |
+| `pedidos360.orders.events.v1` | Snapshots de negocio para ventas, estados y productos | 3 | 3 | 7 días | `pedidos360-report` |
+| `pedidos360.audit.v1` | Eventos mínimos de trazabilidad para el timeline | 3 | 3 | 30 días | `pedidos360-audit` |
+| `pedidos360.login.v1` | Logins verificados de Entra, fuente auxiliar | 3 | 3 | 7 días | `pedidos360-audit` |
+| `pedidos360.report.dlt.v1` | Eventos de reporte inválidos | 3 | 3 | 14 días | inspección manual |
+| `pedidos360.audit.dlt.v1` | Eventos de auditoría inválidos | 3 | 3 | 14 días | inspección manual |
+
+Los dos grupos son independientes y configurables mediante
+`REPORT_CONSUMER_GROUP` y `AUDIT_CONSUMER_GROUP`. Pedidos publica ambos tipos
+con clave `order:<id>`, de modo que los eventos del mismo pedido van a una
+partición estable dentro de cada tópico. Productos publica auditoría con clave
+`product:<id>`. Todos los tópicos usan `cleanup.policy=delete`: compactar por
+ID de entidad descartaría eventos anteriores necesarios para reconstruir la
+línea de tiempo. La persistencia de `auditdb` y `reportdb` tiene su propio ciclo
+de vida, distinto de la retención Kafka. Los consumidores no crean tópicos al
+suscribirse; ejecutar el manifiesto antes de habilitar los flags Kafka.
+
+## Reportería proyectada desde Kafka
+
+`report-service` (puerto 8085) consume `pedidos360.orders.events.v1` con su propio
+grupo y base `reportdb`. `pedidos-service` escribe un snapshot de negocio en el
+outbox transaccional al confirmar la creación, editar ítems o datos y cambiar el
+estado. Este evento tiene `schemaVersion: 1`, `eventId`, ID y revisión del pedido,
+estado, total CLP, fechas UTC e ítems (`productId`, nombre, cantidad y precio
+unitario). Los importes e ítems provienen de la reserva confirmada por el
+servidor. No contiene datos del propietario, detalle ni actor. El evento de
+auditoría sigue siendo separado y no cambia de contrato.
+
+La proyección guarda el último snapshot por pedido y registra cada `eventId` en
+la misma transacción. Una revisión antigua o repetida no revierte el estado.
+Eventos inválidos se envían a `pedidos360.report.dlt.v1` antes de confirmar su
+offset; errores de almacenamiento o DLT se reintentan. Los cuatro endpoints
+`/api/reports/{kpis,sales,lead-time,top-products}` conservan el contrato Angular,
+pero leen exclusivamente `reportdb`. `activeUsers` sigue en `null` porque no hay
+una fuente verificable. `updatedAt` indica la última proyección procesada.
+
+`days` cuenta días de calendario inclusivos en `America/Santiago`. Los conteos
+de estado, cancelación y `totalOrders` consideran pedidos creados en el período;
+ventas, ticket, lead time y top productos consideran pedidos completados en el
+período según la fecha de finalización. Los cancelados no suman ventas. Las
+series mensuales usan el mes de finalización en Santiago.
+
+La publicación y el listener permanecen desactivados inicialmente
+(`REPORT_KAFKA_ENABLED=false`). Antes de activarlos, aplicar
+[`2026-11-21-report-projection.sql`](report-service/db/migrations/2026-11-21-report-projection.sql)
+en `reportdb`, configurar `REPORT_KAFKA_TOPIC` y `KAFKA_BOOTSTRAP_SERVERS` y
+crear los tópicos. En el gateway nuevo, enrutar `/api/reports/*` a
+`report-service:8085`; configurar `REPORT_SERVICE_URL` en pedidos con la URL
+interna de `/internal/health` y compartir `INTERNAL_SERVICE_KEY`. El perfil
+`prod` usa IAM de AWS MSK. No exponer 8085 ni `/internal/health` al navegador.
+Los datos históricos anteriores a la activación no aparecen por arte de magia:
+requieren un backfill verificado de snapshots o replay de eventos completos.
+La ruta anterior en `pedidos-service` se conserva solo durante el corte.
+
 ## Auditoría en Kafka (código preparado)
 
 `audit-service` consume `pedidos360.audit.v1` y persiste su propia tabla
@@ -35,7 +285,7 @@ Variables compartidas: `KAFKA_BOOTSTRAP_SERVERS`, `AUDIT_KAFKA_ENABLED` y
 `pedidos-service` recibe `AUDIT_SERVICE_URL` con la URL interna de ese endpoint,
 `/api/health` consulta al nuevo servicio en vez de la auditoría antigua.
 No enrutar `/internal/health` en API Gateway ni exponer el puerto 8084 a Internet.
-El perfil `prod` configura `SASL_SSL`/`AWS_MSK_IAM`; las
+El perfil `msk` configura `SASL_SSL`/`AWS_MSK_IAM`; las
 credenciales provienen del rol de ejecución AWS. Los clientes de pedidos y
 productos necesitan escribir en el tópico de auditoría; audit-service necesita
 leer los tópicos de auditoría y login con su grupo, y escribir en DLT. El
@@ -66,8 +316,9 @@ la política. La retención del tópico Kafka se configura por separado.
 ### Contrato `/api/*` para Angular
 
 La vista Admin de reportes y auditoría y el panel de estado ya existen en el
-frontend. Reportes y salud viven en `pedidos-service`:
-`GET /api/reports/{kpis,sales,lead-time,top-products}` y `GET /api/health`.
+frontend. `report-service` sirve
+`GET /api/reports/{kpis,sales,lead-time,top-products}`; `pedidos-service`
+mantiene esas rutas heredadas durante el corte y sirve `GET /api/health`.
 `GET /api/audit/events` sigue disponible en `pedidos-service` durante la
 migración; después del corte, el Gateway debe dirigirlo a `audit-service:8084`.
 Todos requieren rol Admin.
@@ -80,13 +331,21 @@ actualizaciones en RabbitMQ (`products.updated.audit`) desde un outbox local
 con reintentos mientras `AUDIT_KAFKA_ENABLED=false`. El código Kafka se describe
 en la sección «Auditoría en Kafka».
 
-`/api/health` informa `bff: DOWN` porque no hay BFF. `orders` y `report`
-comprueban la base de datos local; `products` comprueba que el servicio
-protegido responde 401 sin token. Con `AUDIT_SERVICE_URL`, `audit` consulta
-la salud interna de `audit-service`; sin esa URL conserva la comprobación
-anterior de base de datos y RabbitMQ.
-`report` sigue siendo un módulo dentro de pedidos. `audit-service` es un
-proceso independiente preparado para el corte a Kafka.
+`/api/health` está protegido para Admin. `orders` consulta su propia base;
+`products`, `report` y `audit` consultan respectivamente sus checks
+`/internal/health` con `X-Internal-Key`. Configurar las URLs completas en
+`PRODUCTS_HEALTH_URL`, `REPORT_SERVICE_URL` y `AUDIT_SERVICE_URL`, y compartir
+un `INTERNAL_SERVICE_KEY` no vacío. Cada check responde
+`{"service":"products|report|audit","status":"UP"}` cuando su base está
+disponible; los de reportes y auditoría también comprueban metadatos Kafka si
+su consumo está activo.
+El agregador solo informa `UP` tras recibir HTTP 200 con identidad y estado
+correctos. Respuestas 401/403, caídas, timeout o contenido incorrecto son
+`DOWN`. Un servicio sin URL o sin clave se omite; Angular muestra «SIN DATOS».
+`bff` se omite mientras no exista. Cuando se despliegue uno, configurar
+`BFF_HEALTH_URL` hacia su `/internal/health` que responda
+`{"service":"bff","status":"UP"}`. Mantener estos checks fuera del gateway
+público; únicamente `/api/health` agregado llega al navegador Admin.
 
 `pedidos-service` expone `GET/POST /api/orders`, `GET/PUT /api/orders/{id}` y
 `PATCH /api/orders/{id}/status`. La lista acepta `status`, `q`, `from`, `to`,
@@ -195,7 +454,10 @@ El API Gateway aún debe enrutar `/api/orders/*` y
 
 ## Configuración de identidad
 
-Los servicios existentes ya apuntan al tenant y al audience de Entra ID usados por el frontend. Antes de desplegar, comprueba `issuer-uri` y `app.security.audience` en `application.yml`; para producción usa las variables de entorno y el perfil `prod`.
+Los perfiles de desarrollo aceptan los identificadores anteriores como valores
+por defecto. Para el nuevo despliegue, configurar `ENTRA_TENANT_ID` y
+`ENTRA_API_AUDIENCE` en cada servicio con perfil `prod`, y los mismos valores
+de API en la compilación del frontend.
 
 ## Ejecutar
 
@@ -212,19 +474,19 @@ mvnw.cmd spring-boot:run
   - `GET` → Admin o Cliente
   - `POST` → solo Admin
 - Sin token → 401 · sin permiso → 403.
-- CORS habilitado para `http://localhost:4200` en desarrollo; en producción se configura con `FRONT_URL` (el sitio de GitHub Pages).
+- CORS habilitado para `http://localhost:4200` en desarrollo; en producción se configura con `FRONT_URL` (el origen de CloudFront).
 
 ### CORS, rutas y scope de escritura
 
-El origen de GitHub Pages es `https://carlitos-a.github.io` (sin la ruta del
+`FRONT_URL` contiene el origen real de la SPA (sin la ruta del
 repositorio). `pedidos-service` y `productos-service` aceptan GET, POST, PUT,
-PATCH y OPTIONS con `Authorization` y `Content-Type`. En producción, `FRONT_URL`
-puede sobrescribir ese origen; para varios orígenes usa una lista separada por
+PATCH y OPTIONS con `Authorization` y `Content-Type`. Para varios orígenes usa una lista separada por
 comas. El API Gateway necesita su propia configuración CORS. Con un perfil AWS
 CLI autorizado, ejecuta [`configure-api-gateway-cors.ps1`](scripts/configure-api-gateway-cors.ps1)
-para conservar los orígenes actuales y añadir PUT/PATCH y los dos headers.
+con `-ApiId <nuevo-id> -AllowedOrigins <origen-spa>` para añadir PUT/PATCH y
+los dos headers.
 
-Después, revisa las rutas de la HTTP API `4r80bd3omi` en `us-east-1`: POST
+Después, revisa las rutas de la nueva HTTP API: POST
 `/api/orders`, PUT `/api/orders/{id}`, PATCH `/api/orders/{id}/status`, PATCH
 `/api/orders/{id}/owner`, POST `/api/orders/ownership-migration`, POST
 `/api/products`, PUT `/api/products/{id}` y PATCH
@@ -238,10 +500,10 @@ de la API, añádelo como permiso delegado de la SPA y concede consentimiento.
 Configura `pedidos.write` como único scope de autorización en las rutas de
 escritura del gateway y conserva `pedidos.read` en GET. API Gateway acepta una
 coincidencia con **cualquiera** de los scopes de una ruta; incluir ambos en
-una ruta de escritura permitiría entrar con solo lectura. Una vez que Entra y
-el gateway estén listos, activa `REQUIRE_WRITE_SCOPE=true` en pedidos y
-productos. Así, cada POST/PUT/PATCH exige simultáneamente rol `Admin` y
-`scp` con `pedidos.write`. Hasta esa activación sigue exigiendo rol `Admin`.
+una ruta de escritura permitiría entrar con solo lectura. El perfil `prod`
+activa por defecto `REQUIRE_WRITE_SCOPE=true` en pedidos y productos. Así,
+cada POST/PUT/PATCH exige simultáneamente rol `Admin` y `scp` con
+`pedidos.write`.
 Angular pide `pedidos.read` para iniciar sesión y GET, y `pedidos.write` solo
 para métodos de escritura. Un Cliente podría recibir el scope delegado de la
 SPA, pero su rol sigue bloqueando las escrituras.
@@ -254,7 +516,7 @@ RDS MySQL en producción y H2 en memoria para desarrollo, con credenciales por v
 
 `pedidos-service` guarda el historial de estados junto con el pedido. Cada evento nuevo incluye estado previo y nuevo, fecha UTC del servidor, nombre, rol, `oid` y `tid` del Admin autenticado. La creación tiene estado previo nulo. Pedidos históricos sin eventos conservan `history: []`; los eventos antiguos no reciben identidad ni estado previo inventados.
 
-La mensajería nueva usa `schemaVersion: 2`: cada evento incluye `eventId`, propietario (`customerId` y `customerTenantId`), ítems, total CLP, actor y fecha UTC. Los consumidores siguen aceptando el `OrderCreatedEvent` antiguo sin versión. El evento se escribe en `order_outbox` en la misma transacción que el pedido y el registro de auditoría. Un trabajo programado lo publica con confirmación de RabbitMQ y reintenta fallos; una caída después de la confirmación puede producir una segunda entrega con el mismo `eventId`, por lo que los consumidores con efectos deben deduplicar por evento y destino. Notificación y ticket aún solo registran el procesamiento en el log; los reportes actuales leen la base de pedidos.
+La mensajería nueva usa `schemaVersion: 2`: cada evento incluye `eventId`, propietario (`customerId` y `customerTenantId`), ítems, total CLP, actor y fecha UTC. Los consumidores siguen aceptando el `OrderCreatedEvent` antiguo sin versión. El evento se escribe en `order_outbox` en la misma transacción que el pedido y el registro de auditoría. Un trabajo programado lo publica con confirmación de RabbitMQ y reintenta fallos; una caída después de la confirmación puede producir una segunda entrega con el mismo `eventId`, por lo que los consumidores con efectos deben deduplicar por evento y destino. Notificación y ticket guardan efectos opcionales e idempotentes; report-service mantiene su propia proyección desde Kafka.
 
 | Caso | Exchange y tipo | Routing key | Cola | DLQ |
 |---|---|---|---|---|
@@ -264,7 +526,7 @@ La mensajería nueva usa `schemaVersion: 2`: cada evento incluye `eventId`, prop
 | Cambio de estado | `pedidos360.orders.topic` (topic) | `orders.status.changed` | `pedidos360.orders.audit` | `pedidos360.orders.audit.dlq` |
 | Cancelación | `pedidos360.orders.topic` (topic) | `orders.cancelled` | `pedidos360.orders.audit` | `pedidos360.orders.audit.dlq` |
 
-Nombres y claves se centralizan en `pedidos-service/src/main/resources/application.yml`. Los listeners usan ACK manual; cuando el payload no es procesable, hacen NACK sin requeue y RabbitMQ enruta el mensaje a su DLQ. En producción, ejecutar [`2026-11-19-order-history-outbox.sql`](pedidos-service/db/migrations/2026-11-19-order-history-outbox.sql) en pedidosdb antes de activar el código. Los perfiles local y prod aún usan `ddl-auto: update`.
+Nombres y claves se centralizan en `pedidos-service/src/main/resources/application.yml`. Los listeners usan ACK manual; cuando el payload no es procesable, hacen NACK sin requeue y RabbitMQ enruta el mensaje a su DLQ. En un esquema histórico, aplicar los SQL fechados con respaldo y revisión previa. En un esquema nuevo, Flyway crea las tablas y Hibernate las valida. Los SQL fechados son solo para actualizar un esquema histórico; seguir `docs/aws-code-deploy.md`.
 
 ### Levantar el clúster local
 
@@ -317,7 +579,11 @@ La API valida los nombres y no permite borrar la topología fija del sistema. La
 El JSON para bindings es `{"queue":"pedidos360.dynamic.demo","exchange":"pedidos360.dynamic.events","routingKey":"demo.created"}`. Crea primero la cola y el exchange. La clave vacía es válida para exchanges `fanout`.
 
 
-### Despliegue en AWS: dos EC2
+### Despliegue anterior en AWS: dos EC2 (referencia histórica)
+
+Los pasos siguientes describen la instalación previa de EP4. Para el nuevo
+despliegue usar los perfiles y variables de la sección inicial, y crear las
+rutas del gateway con los identificadores nuevos.
 
 En el despliegue actual, `pedidos-service` y `productos-service` corren en la EC2 `t3.micro`. Los dos nodos RabbitMQ corren en Docker Compose sobre otra EC2 `t3.small` dedicada. El clúster permite mostrar la integración de los dos nodos, pero ambos dependen de la misma instancia; las colas son durables, no replicadas, y la aplicación se conecta al nodo 1. Esto no ofrece alta disponibilidad frente a una caída de esa EC2.
 

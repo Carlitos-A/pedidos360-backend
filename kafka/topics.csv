@@ -1,0 +1,6 @@
+# topic,partitions,replication_factor,retention_ms,cleanup_policy
+pedidos360.orders.events.v1,3,3,604800000,delete
+pedidos360.audit.v1,3,3,2592000000,delete
+pedidos360.login.v1,3,3,604800000,delete
+pedidos360.report.dlt.v1,3,3,1209600000,delete
+pedidos360.audit.dlt.v1,3,3,1209600000,delete

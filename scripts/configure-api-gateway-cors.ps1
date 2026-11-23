@@ -1,7 +1,7 @@
 param(
-    [string]$ApiId = '4r80bd3omi',
+    [Parameter(Mandatory = $true)][string]$ApiId,
     [string]$Region = 'us-east-1',
-    [string[]]$AllowedOrigins = @('https://carlitos-a.github.io', 'http://localhost:4200')
+    [Parameter(Mandatory = $true)][string[]]$AllowedOrigins
 )
 
 $ErrorActionPreference = 'Stop'

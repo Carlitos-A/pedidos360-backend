@@ -1,0 +1,118 @@
+# Six private Java APIs. Run with --env-file .env.apps; bind ports to the EC2
+# private address and allow inbound traffic only from the internal ALB SG.
+x-common-env: &common-env
+  ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:?Set ENTRA_TENANT_ID}
+  ENTRA_API_AUDIENCE: ${ENTRA_API_AUDIENCE:?Set ENTRA_API_AUDIENCE}
+  FRONT_URL: ${FRONT_URL:?Set FRONT_URL}
+  INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?Set KAFKA_BOOTSTRAP_SERVERS}
+
+x-rabbit-env: &rabbit-env
+  RABBITMQ_HOST: ${RABBITMQ_HOST:?Set RABBITMQ_HOST}
+  RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?Set RABBITMQ_USERNAME}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+  RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/pedidos360}
+
+x-db-env: &db-env
+  DB_HOST: ${DB_HOST:?Set DB_HOST}
+  DB_PORT: ${DB_PORT:-3306}
+
+services:
+  pedidos-service:
+    build: ./pedidos-service
+    restart: unless-stopped
+    environment:
+      <<: [*common-env, *rabbit-env, *db-env]
+      SPRING_PROFILES_ACTIVE: prod,kafka-compose
+      DB_NAME: pedidosdb
+      DB_USER: ${PEDIDOS_DB_USER:?Set PEDIDOS_DB_USER}
+      DB_PASSWORD: ${PEDIDOS_DB_PASSWORD:?Set PEDIDOS_DB_PASSWORD}
+      PRODUCTS_INTERNAL_URL: http://productos-service:8082
+      PRODUCTS_HEALTH_URL: http://productos-service:8082/internal/health
+      REPORT_SERVICE_URL: http://report-service:8085/internal/health
+      AUDIT_SERVICE_URL: http://audit-service:8084/internal/health
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      API_SERVICE_PRINCIPAL_ID: ${API_SERVICE_PRINCIPAL_ID:-}
+      CUSTOMER_ROLE_ID: ${CUSTOMER_ROLE_ID:-}
+      REQUIRE_WRITE_SCOPE: ${REQUIRE_WRITE_SCOPE:-true}
+      AUDIT_KAFKA_ENABLED: "true"
+      REPORT_KAFKA_ENABLED: "true"
+      OPTIONAL_WORK_ENABLED: ${OPTIONAL_WORK_ENABLED:-false}
+      RABBIT_DLQ_MONITOR_ENABLED: ${RABBIT_DLQ_MONITOR_ENABLED:-true}
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8081:8081"
+    networks: [pedidos360-apps]
+
+  productos-service:
+    build: ./productos-service
+    restart: unless-stopped
+    environment:
+      <<: [*common-env, *rabbit-env, *db-env]
+      SPRING_PROFILES_ACTIVE: prod,kafka-compose
+      DB_NAME: productosdb
+      DB_USER: ${PRODUCTOS_DB_USER:?Set PRODUCTOS_DB_USER}
+      DB_PASSWORD: ${PRODUCTOS_DB_PASSWORD:?Set PRODUCTOS_DB_PASSWORD}
+      REQUIRE_WRITE_SCOPE: ${REQUIRE_WRITE_SCOPE:-true}
+      AUDIT_KAFKA_ENABLED: "true"
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8082:8082"
+    networks: [pedidos360-apps]
+
+  report-service:
+    build: ./report-service
+    restart: unless-stopped
+    environment:
+      <<: [*common-env, *db-env]
+      SPRING_PROFILES_ACTIVE: prod,kafka-compose
+      DB_NAME: reportdb
+      DB_USER: ${REPORT_DB_USER:?Set REPORT_DB_USER}
+      DB_PASSWORD: ${REPORT_DB_PASSWORD:?Set REPORT_DB_PASSWORD}
+      REPORT_KAFKA_ENABLED: "true"
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8085:8085"
+    networks: [pedidos360-apps]
+
+  audit-service:
+    build: ./audit-service
+    restart: unless-stopped
+    environment:
+      <<: [*common-env, *db-env]
+      SPRING_PROFILES_ACTIVE: prod,kafka-compose
+      DB_NAME: auditdb
+      DB_USER: ${AUDIT_DB_USER:?Set AUDIT_DB_USER}
+      DB_PASSWORD: ${AUDIT_DB_PASSWORD:?Set AUDIT_DB_PASSWORD}
+      AUDIT_KAFKA_ENABLED: "true"
+      AUDIT_DLT_MONITOR_ENABLED: "true"
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      ENTRA_SIGNINS_ENABLED: ${ENTRA_SIGNINS_ENABLED:-false}
+      ENTRA_SPA_APP_ID: ${ENTRA_SPA_APP_ID:-}
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8084:8084"
+    networks: [pedidos360-apps]
+
+  rabbit-admin-service:
+    build: ./rabbit-admin-service
+    restart: unless-stopped
+    environment:
+      <<: [*common-env, *rabbit-env]
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8083:8083"
+    networks: [pedidos360-apps]
+
+  kafka-admin-service:
+    build: ./kafka-admin-service
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SPRING_PROFILES_ACTIVE: prod,kafka-compose
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8086:8086"
+    networks: [pedidos360-apps]
+
+networks:
+  pedidos360-apps:
+    name: pedidos360-apps

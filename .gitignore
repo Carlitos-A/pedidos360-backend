@@ -14,11 +14,15 @@ target/
 
 # Logs y temporales
 *.log
+.tokens/
 *.tmp
 .env
 .env.*
 !.env.example
+!.env.apps.example
 
 # Sistema operativo
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
