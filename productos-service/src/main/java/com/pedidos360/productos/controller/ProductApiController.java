@@ -1,5 +1,9 @@
 package com.pedidos360.productos.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.pedidos360.productos.model.Producto;
 import com.pedidos360.productos.repository.ProductoRepository;
 import com.pedidos360.productos.messaging.ProductAuditPublisher;
@@ -14,19 +18,23 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/products")
+@Tag(name = "Productos", description = "Catálogo asignado a Cliente; escritura exclusiva de Admin")
 public class ProductApiController {
     private final ProductoRepository repository;
     private final ProductAuditPublisher audit;
     public ProductApiController(ProductoRepository repository, ProductAuditPublisher audit) {
         this.repository = repository; this.audit = audit;
     }
+    @Schema(description = "Producto con precio CLP entero, stock no negativo y propietario")
     public record ProductInput(String name, String category, BigDecimal price, Integer stock,
                                String customerId, String customerTenantId) {}
+    @Schema(description = "Ajuste atómico de stock; delta positivo o negativo")
     public record StockInput(Integer delta) {}
     public record ProductView(String id, String name, String category, Long price, Integer stock,
                               String customerId, String customerTenantId) {}
 
     @GetMapping
+    @Operation(summary = "Lista productos", description = "Cliente solo recibe productos asignados a su oid y tid")
     public List<ProductView> list(@AuthenticationPrincipal Jwt jwt) {
         if (jwt.getClaimAsStringList("roles") != null && jwt.getClaimAsStringList("roles").contains("Admin"))
             return repository.findAll().stream().map(this::view).toList();
@@ -38,6 +46,7 @@ public class ProductApiController {
     }
 
     @PostMapping
+    @Operation(summary = "Crea un producto", description = "Solo Admin")
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
     public ProductView create(@RequestBody ProductInput input, @AuthenticationPrincipal Jwt jwt) {
@@ -50,6 +59,7 @@ public class ProductApiController {
     }
 
     @PutMapping("/{id}")
+    @Operation(summary = "Edita un producto", description = "Solo Admin")
     @Transactional
     public ProductView update(@PathVariable Long id, @RequestBody ProductInput input, @AuthenticationPrincipal Jwt jwt) {
         validate(input);
@@ -61,6 +71,7 @@ public class ProductApiController {
     }
 
     @PatchMapping("/{id}/stock")
+    @Operation(summary = "Ajusta stock", description = "Solo Admin; no admite stock negativo y puede responder 409")
     @Transactional
     public ProductView stock(@PathVariable Long id, @RequestBody StockInput input, @AuthenticationPrincipal Jwt jwt) {
         if (input == null || input.delta() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST);

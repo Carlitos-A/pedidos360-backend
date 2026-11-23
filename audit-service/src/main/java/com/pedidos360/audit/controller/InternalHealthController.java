@@ -34,7 +34,7 @@ public class InternalHealthController {
         try {
             repository.count();
             if (kafkaEnabled && kafka.partitionsFor(topic).isEmpty()) throw new IllegalStateException("Sin particiones Kafka");
-            return Map.of("status", "UP");
+            return Map.of("service", "audit", "status", "UP");
         } catch (Exception ex) { throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE); }
     }
 }

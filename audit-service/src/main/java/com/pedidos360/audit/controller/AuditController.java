@@ -1,5 +1,8 @@
 package com.pedidos360.audit.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.pedidos360.audit.model.AuditEvent;
 import com.pedidos360.audit.repository.AuditEventRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -18,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/audit/events")
+@Tag(name = "Auditoría", description = "Timeline de eventos persistidos; solo Admin")
 public class AuditController {
     private static final ZoneId SANTIAGO = ZoneId.of("America/Santiago");
     private static final Set<String> TYPES = Set.of("ORDER_CREATED", "ORDER_STATUS_CHANGED",
@@ -28,6 +32,7 @@ public class AuditController {
     public record Page(List<EventView> items, long total, int page, int pageSize) {}
 
     @GetMapping
+    @Operation(summary = "Consulta eventos de auditoría", description = "Filtros y paginación en servidor; rango de fechas inclusivo en America/Santiago")
     public Page list(@RequestParam(required = false) String user, @RequestParam(required = false) String type,
                      @RequestParam(required = false) LocalDate from, @RequestParam(required = false) LocalDate to,
                      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int pageSize) {

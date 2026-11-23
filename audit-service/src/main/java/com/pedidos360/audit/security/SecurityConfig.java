@@ -33,10 +33,14 @@ public class SecurityConfig {
         return http.cors(Customizer.withDefaults()).csrf(csrf -> csrf.disable())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers(HttpMethod.GET, "/internal/health").permitAll()
+                .requestMatchers(HttpMethod.GET, "/internal/live").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/audit/events").hasAuthority("APPROLE_Admin")
+                .requestMatchers(HttpMethod.GET, "/internal/rejections/kafka").hasAuthority("APPROLE_Admin")
                 .anyRequest().denyAll())
-            .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
+            .oauth2ResourceServer(oauth -> oauth.jwt(jwt ->
+                jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
             .build();
     }
 

@@ -7,12 +7,10 @@ server:
   port: 8081
 
 spring:
+  flyway:
+    enabled: true
   kafka:
-    properties:
-      security.protocol: SASL_SSL
-      sasl.mechanism: AWS_MSK_IAM
-      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
-      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
   jackson:
     deserialization:
       accept-float-as-int: false
@@ -29,13 +27,13 @@ spring:
     properties:
       hibernate.jdbc.time_zone: UTC
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+          issuer-uri: https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0
 
   rabbitmq:
     connection-timeout: 2s
@@ -50,6 +48,11 @@ spring:
     virtual-host: ${RABBITMQ_VHOST:/pedidos360}
 
 app:
+  health:
+    bff-url: ${BFF_HEALTH_URL:}
+    products-url: ${PRODUCTS_HEALTH_URL:}
+    audit-url: ${AUDIT_SERVICE_URL:}
+    report-url: ${REPORT_SERVICE_URL:}
   internal:
     key: ${INTERNAL_SERVICE_KEY:}
   products:
@@ -61,8 +64,8 @@ app:
     api-service-principal-id: ${API_SERVICE_PRINCIPAL_ID:}
     customer-role-id: ${CUSTOMER_ROLE_ID:}
   security:
-    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
-    require-write-scope: ${REQUIRE_WRITE_SCOPE:false}
+    audience: ${ENTRA_API_AUDIENCE}
+    require-write-scope: ${REQUIRE_WRITE_SCOPE:true}
   cors:
     # Origen de GitHub Pages, sin la ruta del repositorio.
-    allowed-origins: ${FRONT_URL:https://carlitos-a.github.io}
+    allowed-origins: ${FRONT_URL}

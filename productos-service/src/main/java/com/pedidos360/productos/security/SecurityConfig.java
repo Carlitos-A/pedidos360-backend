@@ -46,6 +46,9 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.GET, "/internal/live").permitAll()
+                .requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
+                    .permitAll()
                 .requestMatchers("/internal/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/productos/**")
                     .hasAuthority("APPROLE_Admin")

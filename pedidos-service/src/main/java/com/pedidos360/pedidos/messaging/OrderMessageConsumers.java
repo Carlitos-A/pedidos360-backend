@@ -16,7 +16,7 @@ import com.pedidos360.pedidos.model.AuditEvent;
 import com.pedidos360.pedidos.repository.AuditEventRepository;
 import java.time.OffsetDateTime;
 
-/** Cada caso funcional tiene su listener y confirma o rechaza explícitamente el mensaje. */
+/** Legacy audit listener; optional notification and ticket work has dedicated consumers. */
 @Component
 public class OrderMessageConsumers {
     private static final Logger log = LoggerFactory.getLogger(OrderMessageConsumers.class);
@@ -27,17 +27,8 @@ public class OrderMessageConsumers {
         this.objectMapper = objectMapper; this.auditRepository = auditRepository;
     }
 
-    @RabbitListener(queues = "${pedidos360.messaging.queues.notification}")
-    public void procesarNotificacion(Message message, Channel channel) throws IOException {
-        procesar("notificación", message, channel);
-    }
-
-    @RabbitListener(queues = "${pedidos360.messaging.queues.ticket}")
-    public void generarTicket(Message message, Channel channel) throws IOException {
-        procesar("ticket", message, channel);
-    }
-
-    @RabbitListener(queues = "${pedidos360.messaging.queues.audit}")
+    @RabbitListener(queues = "${pedidos360.messaging.queues.audit}",
+                    autoStartup = "${spring.rabbitmq.listener.simple.auto-startup:true}")
     public void registrarAuditoria(Message message, Channel channel) throws IOException {
         long deliveryTag = message.getMessageProperties().getDeliveryTag();
         try {
@@ -76,26 +67,6 @@ public class OrderMessageConsumers {
         } catch (Exception exception) {
             channel.basicNack(deliveryTag, false, false);
             log.warn("[RabbitMQ] NACK auditoría messageId={} causa={}", message.getMessageProperties().getMessageId(), exception.getMessage());
-        }
-    }
-
-    private void procesar(String destino, Message message, Channel channel) throws IOException {
-        long deliveryTag = message.getMessageProperties().getDeliveryTag();
-        try {
-            JsonNode event = orderEvent(message);
-            String customer = event.path("schemaVersion").asInt(1) == 2
-                ? event.path("customerName").asText() : event.path("customer").asText();
-            if (customer.isBlank() || event.path("schemaVersion").asInt(1) == 2
-                    && !"ORDER_CREATED".equals(event.path("eventType").asText())) {
-                throw new IllegalArgumentException("El evento debe incluir orderId y customer");
-            }
-            channel.basicAck(deliveryTag, false);
-            log.info("[RabbitMQ] ACK tarea={} pedido={} messageId={} cliente={}",
-                    destino, event.path("orderId").asText(), message.getMessageProperties().getMessageId(), customer);
-        } catch (Exception exception) {
-            channel.basicNack(deliveryTag, false, false);
-            log.warn("[RabbitMQ] NACK tarea={} messageId={} requeue=false; RabbitMQ enruta a DLQ. Causa: {}",
-                    destino, message.getMessageProperties().getMessageId(), exception.getMessage());
         }
     }
 

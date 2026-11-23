@@ -2,6 +2,8 @@ server:
   port: 8081
 
 spring:
+  flyway:
+    enabled: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
@@ -37,7 +39,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+          issuer-uri: ${ENTRA_ISSUER_URI:https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0}
 
   rabbitmq:
     connection-timeout: 2s
@@ -58,12 +60,24 @@ spring:
         max-concurrency: 3
 
 # Audience esperada: el Application ID URI de la app "Pedidos360-API"
+springdoc:
+  paths-to-match: /api/**
 app:
+  optional-work:
+    enabled: ${OPTIONAL_WORK_ENABLED:false}
+    retry-attempts: ${OPTIONAL_WORK_RETRY_ATTEMPTS:3}
+    retry-delay-ms: ${OPTIONAL_WORK_RETRY_DELAY_MS:500}
   audit:
     kafka-enabled: ${AUDIT_KAFKA_ENABLED:false}
     topic: ${AUDIT_KAFKA_TOPIC:pedidos360.audit.v1}
+  report:
+    kafka-enabled: ${REPORT_KAFKA_ENABLED:false}
+    topic: ${REPORT_KAFKA_TOPIC:pedidos360.orders.events.v1}
   health:
+    bff-url: ${BFF_HEALTH_URL:}
+    products-url: ${PRODUCTS_HEALTH_URL:http://localhost:8082/internal/health}
     audit-url: ${AUDIT_SERVICE_URL:}
+    report-url: ${REPORT_SERVICE_URL:}
   internal:
     key: ${INTERNAL_SERVICE_KEY:}
   products:
@@ -75,11 +89,12 @@ app:
     api-service-principal-id: ${API_SERVICE_PRINCIPAL_ID:}
     customer-role-id: ${CUSTOMER_ROLE_ID:}
   security:
-    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+    audience: ${ENTRA_API_AUDIENCE:api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d}
     require-write-scope: ${REQUIRE_WRITE_SCOPE:false}
 
 pedidos360:
   messaging:
+    dlq-monitor-enabled: ${RABBIT_DLQ_MONITOR_ENABLED:false}
     exchanges:
       orders-direct: pedidos360.orders.direct
       orders-topic: pedidos360.orders.topic

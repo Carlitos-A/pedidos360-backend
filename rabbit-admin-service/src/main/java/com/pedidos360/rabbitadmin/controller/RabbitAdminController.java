@@ -1,5 +1,8 @@
 package com.pedidos360.rabbitadmin.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.pedidos360.rabbitadmin.service.RabbitAdminService;
 import com.pedidos360.rabbitadmin.service.RabbitAdminService.ExchangeInfo;
 import com.pedidos360.rabbitadmin.service.RabbitAdminService.BindingInfo;
@@ -18,14 +21,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/admin")
+@Tag(name = "Rabbit Admin", description = "Red privada; requiere JWT Admin")
 public class RabbitAdminController {
     private final RabbitAdminService service;
     public RabbitAdminController(RabbitAdminService service) { this.service = service; }
 
     @GetMapping("/health")
+    @Operation(summary = "Estado del servicio de administración")
     public Map<String, String> health() { return Map.of("service", "rabbit-admin-service", "status", "UP"); }
 
     @PostMapping("/queues")
+    @Operation(summary = "Crea una cola")
     public ResponseEntity<QueueInfo> crearCola(@RequestBody CreateQueueRequest request) {
         if (request == null || request.durable() == null) {
             throw new IllegalArgumentException("El campo durable es obligatorio");
@@ -36,12 +42,14 @@ public class RabbitAdminController {
     }
 
     @DeleteMapping("/queues/{name}")
+    @Operation(summary = "Elimina una cola")
     public ResponseEntity<Void> eliminarCola(@PathVariable String name) {
         service.eliminarCola(name);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/exchanges")
+    @Operation(summary = "Crea un exchange")
     public ResponseEntity<ExchangeInfo> crearExchange(@RequestBody CreateExchangeRequest request) {
         if (request == null || request.durable() == null) {
             throw new IllegalArgumentException("El campo durable es obligatorio");
@@ -51,12 +59,14 @@ public class RabbitAdminController {
     }
 
     @DeleteMapping("/exchanges/{name}")
+    @Operation(summary = "Elimina un exchange")
     public ResponseEntity<Void> eliminarExchange(@PathVariable String name) {
         service.eliminarExchange(name);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/bindings")
+    @Operation(summary = "Crea un binding")
     public ResponseEntity<BindingInfo> crearBinding(@RequestBody BindingRequest request) {
         if (request == null) throw new IllegalArgumentException("El cuerpo de la solicitud es obligatorio");
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -64,6 +74,7 @@ public class RabbitAdminController {
     }
 
     @DeleteMapping("/bindings")
+    @Operation(summary = "Elimina un binding")
     public ResponseEntity<Void> eliminarBinding(@RequestBody BindingRequest request) {
         if (request == null) throw new IllegalArgumentException("El cuerpo de la solicitud es obligatorio");
         service.eliminarBinding(request.queue(), request.exchange(), request.routingKey());

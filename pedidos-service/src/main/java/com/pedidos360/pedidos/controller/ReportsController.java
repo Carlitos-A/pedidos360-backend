@@ -1,5 +1,8 @@
 package com.pedidos360.pedidos.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.pedidos360.pedidos.model.Pedido;
 import com.pedidos360.pedidos.model.PedidoItem;
 import com.pedidos360.pedidos.model.PedidoStatusEvent;
@@ -16,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/reports")
+@Tag(name = "Compatibilidad heredada", description = "Reportería local temporal; usar report-service tras el corte AWS")
 public class ReportsController {
     private static final ZoneId ZONE = ZoneId.of("America/Santiago");
     private final PedidoRepository repository;
@@ -29,6 +33,7 @@ public class ReportsController {
     public record TopProduct(String productId, String name, long units) {}
 
     @GetMapping("/kpis")
+    @Operation(summary = "KPIs locales heredados", deprecated = true)
     @Transactional
     public Kpis kpis(@RequestParam(defaultValue = "30") int days) {
         List<Pedido> orders = range(days);
@@ -51,6 +56,7 @@ public class ReportsController {
     }
 
     @GetMapping("/sales")
+    @Operation(summary = "Ventas locales heredadas", deprecated = true)
     @Transactional
     public List<Sales> sales(@RequestParam(defaultValue = "365") int days) {
         return range(days).stream().filter(p -> status(p).equals("COMPLETED") && p.getFecha() != null)
@@ -60,6 +66,7 @@ public class ReportsController {
     }
 
     @GetMapping("/lead-time")
+    @Operation(summary = "Lead time local heredado", deprecated = true)
     @Transactional
     public List<LeadTime> leadTime(@RequestParam(defaultValue = "30") int days) {
         return range(days).stream().filter(p -> status(p).equals("COMPLETED") && p.getFecha() != null && leadDays(p) != null)
@@ -69,6 +76,7 @@ public class ReportsController {
     }
 
     @GetMapping("/top-products")
+    @Operation(summary = "Top productos local heredado", deprecated = true)
     @Transactional
     public List<TopProduct> topProducts(@RequestParam(defaultValue = "30") int days) {
         Map<String, TopProduct> totals = new HashMap<>();

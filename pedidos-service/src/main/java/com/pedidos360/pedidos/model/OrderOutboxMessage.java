@@ -4,7 +4,6 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -20,8 +19,7 @@ public class OrderOutboxMessage {
     private String exchangeName;
     @Column(nullable = false)
     private String routingKey;
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String payload;
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

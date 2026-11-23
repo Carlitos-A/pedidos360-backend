@@ -1,5 +1,9 @@
 package com.pedidos360.pedidos.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.pedidos360.pedidos.inventory.OrderWriteService;
 import com.pedidos360.pedidos.messaging.OrderEventPublisher;
 import com.pedidos360.pedidos.model.OrderActor;
@@ -36,6 +40,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @RestController
 @RequestMapping("/api/orders")
+@Tag(name = "Pedidos", description = "Admin administra pedidos; Cliente solo consulta los de su oid y tid")
 public class OrderApiController {
     private final PedidoRepository repository;
     private final OrderWriteService writer;
@@ -51,6 +56,7 @@ public class OrderApiController {
     }
 
     public record OrderItemInput(String productId, String name, Integer quantity, BigDecimal unitPrice) {}
+    @Schema(description = "Datos de pedido. Total y precios del navegador se verifican y recalculan en el servidor")
     public record OrderInput(String customerName, String customerId, String customerTenantId,
                              String detail, BigDecimal total, List<OrderItemInput> items,
                              String requestId, Long expectedVersion) {}
@@ -58,11 +64,13 @@ public class OrderApiController {
     public record OwnerInput(String customerId, String customerTenantId) {}
     public record LegacyOwnerInput(Long orderId, String customerId, String customerTenantId) {}
     public record Page<T>(List<T> items, long total, int page, int pageSize) {}
+    @Schema(description = "Pedido con propietario, ítems, estado e historial persistidos")
     public record OrderView(String id, String customerName, String customerId, String customerTenantId,
                             String detail, Long total, String status, String createdAt,
                             String updatedAt, Long version, List<PedidoStatusEvent> history, List<PedidoItem> items) {}
 
     @GetMapping
+    @Operation(summary = "Lista pedidos filtrados antes de paginar", description = "Cliente solo recibe sus pedidos por oid y tid; page comienza en 0 y las fechas usan America/Santiago")
     @Transactional
     public Page<OrderView> list(@AuthenticationPrincipal Jwt jwt,
             @RequestParam(required = false) String status, @RequestParam(required = false) String q,
@@ -105,6 +113,7 @@ public class OrderApiController {
     }
 
     @GetMapping("/{id}")
+    @Operation(summary = "Obtiene un pedido propio o cualquier pedido para Admin")
     @Transactional
     public OrderView get(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
         Pedido p = find(id);
@@ -113,6 +122,7 @@ public class OrderApiController {
     }
 
     @PostMapping
+    @Operation(summary = "Crea un pedido", description = "Solo Admin; asigna propietario verificado y estado CREATED")
     @ResponseStatus(HttpStatus.CREATED)
     public OrderView create(@RequestBody OrderInput input, @AuthenticationPrincipal Jwt jwt) {
         validate(input, true);
@@ -122,6 +132,7 @@ public class OrderApiController {
     }
 
     @PutMapping("/{id}")
+    @Operation(summary = "Edita los datos del pedido", description = "Solo Admin; exige expectedVersion y no cambia el estado")
     public OrderView update(@PathVariable Long id, @RequestBody OrderInput input) {
         validate(input, false);
         return view(writer.update(id, new OrderWriteService.Input(null, input.expectedVersion(), input.detail(), items(input)),
@@ -129,6 +140,7 @@ public class OrderApiController {
     }
 
     @PatchMapping("/{id}/owner")
+    @Operation(summary = "Reasigna propietario", description = "Operación administrativa sujeta a restricciones de inventario")
     @Transactional
     public OrderView reassign(@PathVariable Long id, @RequestBody OwnerInput input, @AuthenticationPrincipal Jwt jwt) {
         if (input == null) bad();
@@ -147,6 +159,7 @@ public class OrderApiController {
     }
 
     @PostMapping("/ownership-migration")
+    @Operation(summary = "Migra propietarios históricos verificados", description = "Solo Admin; nunca infiere dueño por nombre")
     @Transactional
     public Map<String, Integer> migrateOwners(@RequestBody List<LegacyOwnerInput> input, @AuthenticationPrincipal Jwt jwt) {
         if (input == null || input.isEmpty() || input.size() > 100) bad();
@@ -170,6 +183,7 @@ public class OrderApiController {
     }
 
     @PatchMapping("/{id}/status")
+    @Operation(summary = "Cambia el estado del pedido", description = "Solo Admin; valida transición y expectedVersion, responde 409 ante conflicto")
     @Transactional
     public OrderView status(@PathVariable Long id, @RequestBody StatusInput input, @AuthenticationPrincipal Jwt jwt) {
         if (input == null || input.expectedVersion() == null || input.expectedVersion() < 0) bad();

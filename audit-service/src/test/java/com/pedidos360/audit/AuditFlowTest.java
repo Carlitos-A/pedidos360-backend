@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest(properties = {"app.audit.kafka-enabled=false", "app.internal.key=test-key"})
 @AutoConfigureMockMvc
@@ -28,8 +29,27 @@ class AuditFlowTest {
     @Autowired AuditEventRepository repository;
     @Autowired AuditController controller;
     @Autowired MockMvc mvc;
+
+    @Test void livenessPermiteHealthCheckSinTokenNiClave() throws Exception {
+        mvc.perform(get("/internal/live"))
+            .andExpect(status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.status").value("UP"));
+    }
     @Autowired KafkaListenerEndpointRegistry listeners;
     @MockitoBean JwtDecoder jwtDecoder;
+
+    @Test void openApiPublicaSoloTimelineYBearer() throws Exception {
+        var spec = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+            mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        assertTrue(spec.path("paths").has("/api/audit/events"));
+        assertFalse(spec.path("paths").has("/internal/rejections/kafka"));
+        assertEquals("bearer", spec.path("components").path("securitySchemes")
+            .path("bearerAuth").path("scheme").asText());
+        assertTrue(spec.path("paths").path("/api/audit/events").path("get")
+            .path("responses").has("403"));
+        assertTrue(spec.path("components").path("schemas").has("EventView"));
+    }
 
     @Test @Transactional void consumeUnaVezYFiltraAntesDePaginarConDiaDeSantiago() {
         ingestor.ingest("pedidos360.audit.v1", """
@@ -69,15 +89,23 @@ class AuditFlowTest {
     }
 
     @Test void consultaExigeAdmin() throws Exception {
-        assertEquals(1, listeners.getListenerContainers().size());
-        assertFalse(listeners.getListenerContainers().iterator().next().isRunning());
+        assertEquals(2, listeners.getListenerContainers().size());
+        assertTrue(listeners.getListenerContainers().stream().noneMatch(container -> container.isRunning()));
         mvc.perform(get("/api/audit/events")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/audit/events").with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Cliente"))))
             .andExpect(status().isForbidden());
         mvc.perform(get("/api/audit/events").with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Admin"))))
             .andExpect(status().isOk());
+        mvc.perform(get("/internal/rejections/kafka")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/internal/rejections/kafka")
+            .with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Cliente"))))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/internal/rejections/kafka")
+            .with(jwt().authorities(new SimpleGrantedAuthority("APPROLE_Admin"))))
+            .andExpect(status().isOk());
         mvc.perform(get("/internal/health")).andExpect(status().isForbidden());
         mvc.perform(get("/internal/health").header("X-Internal-Key", "test-key"))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk()).andExpect(jsonPath("$.service").value("audit"))
+            .andExpect(jsonPath("$.status").value("UP"));
     }
 }

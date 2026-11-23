@@ -125,6 +125,7 @@ public class OrderWriteService {
                 p.setDetalle(input.detail().strip());
                 p.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
                 Pedido saved = orders.saveAndFlush(p);
+                publisher.enqueueUpdated(saved);
                 touch(saved);
                 return saved;
             }
@@ -216,6 +217,7 @@ public class OrderWriteService {
             current.getItems().clear(); current.getItems().addAll(snapshot(quote));
             current.setTotalClp(quote.total()); current.setUpdatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             Pedido result = orders.saveAndFlush(current);
+            publisher.enqueueUpdated(result);
             updates.delete(change);
             touch(result);
             return result;

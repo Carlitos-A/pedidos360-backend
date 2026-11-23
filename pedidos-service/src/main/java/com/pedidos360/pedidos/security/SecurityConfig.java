@@ -51,9 +51,14 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.GET, "/internal/live").permitAll()
+                .requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
+                    .permitAll()
                 .requestMatchers(HttpMethod.GET, "/pedidos/**")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/orders", "/api/orders/**")
+                    .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
+                .requestMatchers(HttpMethod.GET, "/api/notifications")
                     .hasAnyAuthority("APPROLE_Admin", "APPROLE_Cliente")
                 .requestMatchers(HttpMethod.GET, "/api/reports/**")
                     .hasAuthority("APPROLE_Admin")
@@ -62,6 +67,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/audit/events")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.GET, "/api/health")
+                    .hasAuthority("APPROLE_Admin")
+                .requestMatchers(HttpMethod.GET, "/internal/rejections/rabbit")
                     .hasAuthority("APPROLE_Admin")
                 .requestMatchers(HttpMethod.POST, "/api/orders", "/api/orders/**")
                     .access(AdminWriteAuthorization.require(requireWriteScope))

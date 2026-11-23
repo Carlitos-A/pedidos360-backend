@@ -1,0 +1,52 @@
+server:
+  port: 8085
+spring:
+  flyway:
+    enabled: false
+  application:
+    name: report-service
+  datasource:
+    url: jdbc:h2:mem:reportdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+    hibernate:
+      ddl-auto: update
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${ENTRA_ISSUER_URI:https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${REPORT_CONSUMER_GROUP:pedidos360-report}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        allow.auto.create.topics: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+springdoc:
+  paths-to-match: /api/reports/**
+app:
+  internal:
+    key: ${INTERNAL_SERVICE_KEY:}
+  security:
+    audience: ${ENTRA_API_AUDIENCE:api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d}
+  report:
+    kafka-enabled: ${REPORT_KAFKA_ENABLED:false}
+    topic: ${REPORT_KAFKA_TOPIC:pedidos360.orders.events.v1}
+    dlt-topic: ${REPORT_DLT_TOPIC:pedidos360.report.dlt.v1}
+    retry-delay-ms: ${REPORT_RETRY_DELAY_MS:1000}

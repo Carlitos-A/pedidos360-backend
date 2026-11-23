@@ -15,13 +15,40 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class KafkaAuditPublisherTest {
+    @Test void edicionPublicaSnapshotDeNegocioParaReporteria() throws Exception {
+        @SuppressWarnings("unchecked") KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+        OrderOutboxRepository outbox = mock(OrderOutboxRepository.class);
+        var publisher = new OrderEventPublisher(mock(RabbitTemplate.class), kafka, new ObjectMapper(), outbox,
+            "direct", "topic", "created", "ticket", "audit", "status", "cancelled",
+            false, "pedidos360.audit.v1", true, "pedidos360.orders.events.v1");
+        Pedido order = new Pedido("Cliente privado", "Detalle privado", 200.0, "ACCEPTED");
+        order.setId(42L);
+        order.setCreatedAtUtc(java.time.Instant.parse("2026-11-20T12:00:00Z"));
+        order.setUpdatedAt(OffsetDateTime.parse("2026-11-20T13:00:00Z"));
+        order.setTotalClp(200L);
+        order.getItems().add(new PedidoItem("7", "Producto", 2, 100L));
+        org.springframework.test.util.ReflectionTestUtils.setField(order, "version", 3L);
+        publisher.enqueueUpdated(order);
+        var captor = org.mockito.ArgumentCaptor.forClass(OrderOutboxMessage.class);
+        verify(outbox).save(captor.capture());
+        var entry = captor.getValue();
+        assertEquals("pedidos360.orders.events.v1", entry.getRoutingKey());
+        var json = new ObjectMapper().readTree(entry.getPayload());
+        assertEquals("order-report-42-3", json.path("eventId").asText());
+        assertEquals(200, json.path("total").asLong());
+        assertEquals(2, json.path("items").get(0).path("quantity").asInt());
+        assertFalse(json.has("customerName"));
+        assertFalse(json.has("detail"));
+        assertFalse(json.has("actorEmail"));
+    }
+
     @Test void estadoVaPorKafkaConPayloadMinimoYSeCierraSoloTrasConfirmar() throws Exception {
         @SuppressWarnings("unchecked") KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         RabbitTemplate rabbit = mock(RabbitTemplate.class);
         OrderOutboxRepository outbox = mock(OrderOutboxRepository.class);
         var publisher = new OrderEventPublisher(rabbit, kafka, new ObjectMapper(), outbox,
             "direct", "topic", "orders.created", "orders.created.ticket", "orders.created.audit",
-            "orders.status.changed", "orders.cancelled", true, "pedidos360.audit.v1");
+            "orders.status.changed", "orders.cancelled", true, "pedidos360.audit.v1", false, "orders.events");
         Pedido order = new Pedido("Nombre privado", "Detalle privado", 200.0, "CANCELLED");
         order.setId(52L); order.setCustomerId("owner"); order.setCustomerTenantId("tenant");
         order.getItems().add(new PedidoItem("7", "Producto privado", 2, 100L));
@@ -53,7 +80,7 @@ class KafkaAuditPublisherTest {
         @SuppressWarnings("unchecked") KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         OrderOutboxRepository outbox = mock(OrderOutboxRepository.class);
         var publisher = new OrderEventPublisher(mock(RabbitTemplate.class), kafka, new ObjectMapper(), outbox,
-            "direct", "topic", "created", "ticket", "audit", "status", "cancelled", true, "pedidos360.audit.v1");
+            "direct", "topic", "created", "ticket", "audit", "status", "cancelled", true, "pedidos360.audit.v1", false, "orders.events");
         var entry = new OrderOutboxMessage("event-1", "kafka", "pedidos360.audit.v1", "{\"entityId\":\"1\"}");
         var later = new OrderOutboxMessage("event-2", "kafka", "pedidos360.audit.v1", "{\"entityId\":\"1\"}");
         when(outbox.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(entry, later));
@@ -71,7 +98,7 @@ class KafkaAuditPublisherTest {
         @SuppressWarnings("unchecked") KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
         OrderOutboxRepository outbox = mock(OrderOutboxRepository.class);
         var publisher = new OrderEventPublisher(mock(RabbitTemplate.class), kafka, new ObjectMapper(), outbox,
-            "direct", "topic", "created", "ticket", "audit", "status", "cancelled", true, "pedidos360.audit.v1");
+            "direct", "topic", "created", "ticket", "audit", "status", "cancelled", true, "pedidos360.audit.v1", false, "orders.events");
         Pedido order = new Pedido("Cliente", "Detalle", 100.0, "CREATED");
         order.setId(42L);
         order.setUpdatedAt(OffsetDateTime.parse("2026-11-20T12:00:00Z"));

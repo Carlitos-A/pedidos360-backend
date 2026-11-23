@@ -1,5 +1,8 @@
 package com.pedidos360.pedidos.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.pedidos360.pedidos.model.AuditEvent;
 import com.pedidos360.pedidos.repository.AuditEventRepository;
 import java.time.LocalDate;
@@ -12,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/audit/events")
+@Tag(name = "Compatibilidad heredada", description = "Auditoría local temporal; usar audit-service tras el corte AWS")
 public class AuditController {
     private static final ZoneId ZONE = ZoneId.of("America/Santiago");
     private final AuditEventRepository repository;
@@ -19,6 +23,7 @@ public class AuditController {
     public record EventView(String id, String type, String description, String actorEmail, String occurredAt) {}
     public record Page(List<EventView> items, long total, int page, int pageSize) {}
     @GetMapping
+    @Operation(summary = "Consulta auditoría local heredada", deprecated = true)
     public Page list(@RequestParam(required = false) String user, @RequestParam(required = false) String type,
                      @RequestParam(required = false) LocalDate from, @RequestParam(required = false) LocalDate to,
                      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int pageSize) {

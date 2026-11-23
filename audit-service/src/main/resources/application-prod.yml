@@ -1,6 +1,8 @@
 server:
   port: 8084
 spring:
+  flyway:
+    enabled: true
   datasource:
     url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:auditdb}?useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=true
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -10,11 +12,14 @@ spring:
     hibernate:
       ddl-auto: validate
   kafka:
-    properties:
-      security.protocol: SASL_SSL
-      sasl.mechanism: AWS_MSK_IAM
-      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
-      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0
 app:
+  security:
+    audience: ${ENTRA_API_AUDIENCE}
   cors:
-    allowed-origins: ${FRONT_URL:https://carlitos-a.github.io}
+    allowed-origins: ${FRONT_URL}

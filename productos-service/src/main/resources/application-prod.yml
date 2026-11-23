@@ -7,12 +7,10 @@ server:
   port: 8082
 
 spring:
+  flyway:
+    enabled: true
   kafka:
-    properties:
-      security.protocol: SASL_SSL
-      sasl.mechanism: AWS_MSK_IAM
-      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
-      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
   jackson:
     deserialization:
       accept-float-as-int: false
@@ -38,20 +36,20 @@ spring:
     password: ${DB_PASSWORD}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
 
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+          issuer-uri: https://login.microsoftonline.com/${ENTRA_TENANT_ID}/v2.0
 
 app:
   internal:
     key: ${INTERNAL_SERVICE_KEY:}
   security:
-    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
-    require-write-scope: ${REQUIRE_WRITE_SCOPE:false}
+    audience: ${ENTRA_API_AUDIENCE}
+    require-write-scope: ${REQUIRE_WRITE_SCOPE:true}
   cors:
     # Origen de GitHub Pages, sin la ruta del repositorio.
-    allowed-origins: ${FRONT_URL:https://carlitos-a.github.io}
+    allowed-origins: ${FRONT_URL}

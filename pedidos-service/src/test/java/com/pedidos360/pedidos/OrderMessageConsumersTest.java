@@ -17,18 +17,6 @@ class OrderMessageConsumersTest {
     private final Channel channel = mock(Channel.class);
     private final OrderMessageConsumers consumer = new OrderMessageConsumers(new ObjectMapper(), audit);
 
-    @Test void notificacionAceptaElEventoAntiguoYElNuevo() throws Exception {
-        consumer.procesarNotificacion(message("{" +
-            "\"orderId\":1,\"customer\":\"Cliente\",\"createdAt\":\"2026-11-19T12:00:00\"}", "orders.created", 1), channel);
-        consumer.procesarNotificacion(message("{" +
-            "\"schemaVersion\":2,\"eventId\":\"event-2\",\"eventType\":\"ORDER_CREATED\","
-            + "\"orderId\":2,\"customerName\":\"Cliente\",\"customerId\":\"owner\","
-            + "\"customerTenantId\":\"tenant\"}", "orders.created", 2), channel);
-        verify(channel).basicAck(1L, false);
-        verify(channel).basicAck(2L, false);
-        verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
-    }
-
     @Test void cambioDeEstadoSeAuditaUnaSolaVez() throws Exception {
         Message event = message("{" +
             "\"schemaVersion\":2,\"eventId\":\"event-3\",\"eventType\":\"ORDER_CANCELLED\","

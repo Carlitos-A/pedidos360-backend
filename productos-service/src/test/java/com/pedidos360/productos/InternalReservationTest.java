@@ -15,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {"app.internal.key=test-key", "spring.rabbitmq.listener.simple.auto-startup=false"})
@@ -23,6 +25,14 @@ class InternalReservationTest {
     @Autowired InternalReservationController controller;
     @Autowired ProductoRepository products;
     @Autowired MockMvc mvc;
+
+    @Test void healthInternoVerificaClaveYBaseDeProductos() throws Exception {
+        mvc.perform(get("/internal/health")).andExpect(status().isForbidden());
+        mvc.perform(get("/internal/health").header("X-Internal-Key", "test-key"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.service").value("products"))
+            .andExpect(jsonPath("$.status").value("UP"));
+    }
 
     @Test void rutaInternaExigeClaveCompartida() throws Exception {
         String body = "{\"customerId\":\"owner\",\"customerTenantId\":\"tenant\",\"validatePrices\":true,\"items\":[]}";

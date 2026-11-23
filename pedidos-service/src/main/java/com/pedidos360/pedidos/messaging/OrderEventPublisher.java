@@ -41,6 +41,8 @@ public class OrderEventPublisher {
     private final String cancelledKey;
     private final boolean kafkaAuditEnabled;
     private final String kafkaAuditTopic;
+    private final boolean kafkaReportEnabled;
+    private final String kafkaReportTopic;
 
     public OrderEventPublisher(RabbitTemplate rabbitTemplate, KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
             OrderOutboxRepository outbox,
@@ -52,7 +54,9 @@ public class OrderEventPublisher {
             @Value("${pedidos360.messaging.routing-keys.status-changed}") String statusChangedKey,
             @Value("${pedidos360.messaging.routing-keys.order-cancelled}") String cancelledKey,
             @Value("${app.audit.kafka-enabled:false}") boolean kafkaAuditEnabled,
-            @Value("${app.audit.topic:pedidos360.audit.v1}") String kafkaAuditTopic) {
+            @Value("${app.audit.topic:pedidos360.audit.v1}") String kafkaAuditTopic,
+            @Value("${app.report.kafka-enabled:false}") boolean kafkaReportEnabled,
+            @Value("${app.report.topic:pedidos360.orders.events.v1}") String kafkaReportTopic) {
         this.rabbitTemplate = rabbitTemplate; this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper; this.outbox = outbox;
         this.directExchange = directExchange; this.topicExchange = topicExchange;
@@ -60,6 +64,7 @@ public class OrderEventPublisher {
         this.auditCreatedKey = auditCreatedKey; this.statusChangedKey = statusChangedKey;
         this.cancelledKey = cancelledKey;
         this.kafkaAuditEnabled = kafkaAuditEnabled; this.kafkaAuditTopic = kafkaAuditTopic;
+        this.kafkaReportEnabled = kafkaReportEnabled; this.kafkaReportTopic = kafkaReportTopic;
     }
 
     /** Called inside the same database transaction that confirms the order. */
@@ -67,10 +72,10 @@ public class OrderEventPublisher {
         OrderEventV2 event = OrderEventV2.from(order, change, "ORDER_CREATED",
             "order-created-" + order.getId(), order.getRequestActorEmail());
         String payload = json(event);
-        outbox.saveAll(List.of(
-            new OrderOutboxMessage(event.eventId(), directExchange, orderCreatedKey, payload),
-            new OrderOutboxMessage(event.eventId(), topicExchange, ticketCreatedKey, payload),
-            auditDelivery(order, change, event, auditCreatedKey)));
+        outbox.save(new OrderOutboxMessage(event.eventId(), directExchange, orderCreatedKey, payload));
+        outbox.save(new OrderOutboxMessage(event.eventId(), topicExchange, ticketCreatedKey, payload));
+        outbox.save(auditDelivery(order, change, event, auditCreatedKey));
+        enqueueReport(order, change.getChangedAt().toInstant());
     }
 
     /** Called inside the same database transaction as the status and audit rows. */
@@ -79,6 +84,36 @@ public class OrderEventPublisher {
         OrderEventV2 event = OrderEventV2.from(order, change,
             cancelled ? "ORDER_CANCELLED" : "ORDER_STATUS_CHANGED", auditKey, actorEmail);
         outbox.save(auditDelivery(order, change, event, cancelled ? cancelledKey : statusChangedKey));
+        enqueueReport(order, change.getChangedAt().toInstant());
+    }
+
+    /** Called after an order edit is committed in the order transaction. */
+    public void enqueueUpdated(Pedido order) {
+        enqueueReport(order, order.getUpdatedAt().toInstant());
+    }
+
+    private void enqueueReport(Pedido order, java.time.Instant occurredAt) {
+        if (!kafkaReportEnabled) return;
+        if (order.getTotalClp() == null || order.getCreatedAtUtc() == null || order.getItems().isEmpty()) {
+            log.warn("Pedido histórico {} sin snapshot verificable para reportería; requiere backfill", order.getId());
+            return;
+        }
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("schemaVersion", 1);
+        event.put("eventId", "order-report-" + order.getId() + "-" + order.getVersion());
+        event.put("type", "ORDER_SNAPSHOT");
+        event.put("orderId", String.valueOf(order.getId()));
+        event.put("revision", order.getVersion());
+        event.put("occurredAt", occurredAt.toString());
+        event.put("createdAt", order.getCreatedAtUtc().toString());
+        event.put("status", order.getEstado());
+        event.put("total", order.getTotalClp());
+        event.put("items", order.getItems().stream().map(item -> Map.of(
+            "productId", item.getProductId(), "name", item.getName(),
+            "quantity", item.getQuantity(), "unitPrice", item.getUnitPrice())).toList());
+        try { outbox.save(new OrderOutboxMessage((String) event.get("eventId"), "kafka", kafkaReportTopic,
+            objectMapper.writeValueAsString(event))); }
+        catch (JsonProcessingException ex) { throw new IllegalStateException("No se pudo serializar reporte", ex); }
     }
 
     /** Owner changes were local-only before Kafka; keep the same key as the legacy audit row. */
@@ -104,7 +139,9 @@ public class OrderEventPublisher {
         for (OrderOutboxMessage entry : outbox.findTop100ByPublishedAtIsNullOrderByCreatedAtAsc()) {
             try {
                 if ("kafka".equals(entry.getExchangeName())) {
-                    String orderId = objectMapper.readTree(entry.getPayload()).path("entityId").asText();
+                    var event = objectMapper.readTree(entry.getPayload());
+                    String orderId = event.path("entityId").asText("");
+                    if (orderId.isBlank()) orderId = event.path("orderId").asText("");
                     if (orderId.isBlank()) throw new IllegalStateException("Evento Kafka sin pedido");
                     kafkaTemplate.send(entry.getRoutingKey(), "order:" + orderId, entry.getPayload()).get(10, TimeUnit.SECONDS);
                 } else {

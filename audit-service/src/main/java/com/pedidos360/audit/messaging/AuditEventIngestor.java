@@ -8,7 +8,6 @@ import com.pedidos360.audit.repository.AuditEventRepository;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +48,7 @@ public class AuditEventIngestor {
             acknowledgment.acknowledge();
         } catch (InvalidAuditEventException invalid) {
             // A malformed event must be visible for review; do not advance the offset until DLT confirms it.
-            kafka.send(dltTopic, record.key(), record.value()).get(10, TimeUnit.SECONDS);
+            DeadLetterPublisher.publish(kafka, dltTopic, record, invalid.getMessage());
             log.warn("Evento de auditoría inválido en {} offset {}: {}",
                 record.topic(), record.offset(), invalid.getMessage());
             acknowledgment.acknowledge();

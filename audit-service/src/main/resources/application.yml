@@ -1,6 +1,8 @@
 server:
   port: 8084
 spring:
+  flyway:
+    enabled: false
   application:
     name: audit-service
   datasource:
@@ -18,15 +20,17 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0
+          issuer-uri: ${ENTRA_ISSUER_URI:https://login.microsoftonline.com/bb5324af-c266-41ed-b36c-a971641c7af2/v2.0}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: pedidos360-audit
+      group-id: ${AUDIT_CONSUMER_GROUP:pedidos360-audit}
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       auto-offset-reset: earliest
       enable-auto-commit: false
+      properties:
+        allow.auto.create.topics: false
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -34,18 +38,25 @@ spring:
       properties:
         enable.idempotence: true
         max.block.ms: 5000
+springdoc:
+  paths-to-match: /api/audit/**
 app:
   internal:
     key: ${INTERNAL_SERVICE_KEY:}
   security:
-    audience: api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d
+    audience: ${ENTRA_API_AUDIENCE:api://6c685bd4-57e4-4ba3-aa63-c8bd6a00cd4d}
   audit:
     kafka-enabled: ${AUDIT_KAFKA_ENABLED:false}
     retention-days: ${AUDIT_RETENTION_DAYS:0}
     topic: ${AUDIT_KAFKA_TOPIC:pedidos360.audit.v1}
     login-topic: ${AUDIT_LOGIN_TOPIC:pedidos360.login.v1}
     dlt-topic: ${AUDIT_DLT_TOPIC:pedidos360.audit.dlt.v1}
-    group-id: pedidos360-audit
+    dlt-monitor-enabled: ${AUDIT_DLT_MONITOR_ENABLED:false}
+    dlt-monitor-group: ${AUDIT_DLT_MONITOR_GROUP:pedidos360-dlt-monitor}
+    retry-delay-ms: ${AUDIT_RETRY_DELAY_MS:1000}
+    group-id: ${AUDIT_CONSUMER_GROUP:pedidos360-audit}
+  report:
+    dlt-topic: ${REPORT_DLT_TOPIC:pedidos360.report.dlt.v1}
   entra:
     signins-enabled: ${ENTRA_SIGNINS_ENABLED:false}
     tenant-id: ${ENTRA_TENANT_ID:}
