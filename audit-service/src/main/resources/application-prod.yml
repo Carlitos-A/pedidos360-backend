@@ -4,7 +4,7 @@ spring:
   flyway:
     enabled: true
   datasource:
-    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:auditdb}?useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:auditdb}?sslMode=${DB_SSL_MODE:REQUIRED}&serverTimezone=UTC&allowPublicKeyRetrieval=true
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: ${DB_USER}
     password: ${DB_PASSWORD}

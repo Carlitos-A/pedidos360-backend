@@ -15,10 +15,32 @@ x-rabbit-env: &rabbit-env
   RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/pedidos360}
 
 x-db-env: &db-env
-  DB_HOST: ${DB_HOST:?Set DB_HOST}
-  DB_PORT: ${DB_PORT:-3306}
+  DB_HOST: mysql
+  DB_PORT: 3306
+  DB_SSL_MODE: DISABLED
 
 services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      PEDIDOS_DB_PASSWORD: ${PEDIDOS_DB_PASSWORD:?Set PEDIDOS_DB_PASSWORD}
+      PRODUCTOS_DB_PASSWORD: ${PRODUCTOS_DB_PASSWORD:?Set PRODUCTOS_DB_PASSWORD}
+      REPORT_DB_PASSWORD: ${REPORT_DB_PASSWORD:?Set REPORT_DB_PASSWORD}
+      AUDIT_DB_PASSWORD: ${AUDIT_DB_PASSWORD:?Set AUDIT_DB_PASSWORD}
+    volumes:
+      - pedidos360-mysql-data:/var/lib/mysql
+      - ./db/001_create_databases.sql:/docker-entrypoint-initdb.d/01_create_databases.sql:ro
+      - ./db/002_create_users.sh:/docker-entrypoint-initdb.d/02_create_users.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${AUDIT_DB_PASSWORD}\" mysql -uaudit_app -Dauditdb -h localhost --silent -e 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks: [pedidos360-apps]
+
   pedidos-service:
     build: ./pedidos-service
     restart: unless-stopped
@@ -26,7 +48,7 @@ services:
       <<: [*common-env, *rabbit-env, *db-env]
       SPRING_PROFILES_ACTIVE: prod,kafka-compose
       DB_NAME: pedidosdb
-      DB_USER: ${PEDIDOS_DB_USER:?Set PEDIDOS_DB_USER}
+      DB_USER: pedidos_app
       DB_PASSWORD: ${PEDIDOS_DB_PASSWORD:?Set PEDIDOS_DB_PASSWORD}
       PRODUCTS_INTERNAL_URL: http://productos-service:8082
       PRODUCTS_HEALTH_URL: http://productos-service:8082/internal/health
@@ -39,6 +61,8 @@ services:
       RABBIT_DLQ_MONITOR_ENABLED: ${RABBIT_DLQ_MONITOR_ENABLED:-true}
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8081:8081"
+    depends_on:
+      mysql: { condition: service_healthy }
     networks: [pedidos360-apps]
 
   productos-service:
@@ -48,12 +72,14 @@ services:
       <<: [*common-env, *rabbit-env, *db-env]
       SPRING_PROFILES_ACTIVE: prod,kafka-compose
       DB_NAME: productosdb
-      DB_USER: ${PRODUCTOS_DB_USER:?Set PRODUCTOS_DB_USER}
+      DB_USER: productos_app
       DB_PASSWORD: ${PRODUCTOS_DB_PASSWORD:?Set PRODUCTOS_DB_PASSWORD}
       REQUIRE_WRITE_SCOPE: ${REQUIRE_WRITE_SCOPE:-true}
       AUDIT_KAFKA_ENABLED: "true"
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8082:8082"
+    depends_on:
+      mysql: { condition: service_healthy }
     networks: [pedidos360-apps]
 
   report-service:
@@ -63,11 +89,13 @@ services:
       <<: [*common-env, *db-env]
       SPRING_PROFILES_ACTIVE: prod,kafka-compose
       DB_NAME: reportdb
-      DB_USER: ${REPORT_DB_USER:?Set REPORT_DB_USER}
+      DB_USER: report_app
       DB_PASSWORD: ${REPORT_DB_PASSWORD:?Set REPORT_DB_PASSWORD}
       REPORT_KAFKA_ENABLED: "true"
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8085:8085"
+    depends_on:
+      mysql: { condition: service_healthy }
     networks: [pedidos360-apps]
 
   audit-service:
@@ -77,12 +105,14 @@ services:
       <<: [*common-env, *db-env]
       SPRING_PROFILES_ACTIVE: prod,kafka-compose
       DB_NAME: auditdb
-      DB_USER: ${AUDIT_DB_USER:?Set AUDIT_DB_USER}
+      DB_USER: audit_app
       DB_PASSWORD: ${AUDIT_DB_PASSWORD:?Set AUDIT_DB_PASSWORD}
       AUDIT_KAFKA_ENABLED: "true"
       AUDIT_DLT_MONITOR_ENABLED: "true"
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8084:8084"
+    depends_on:
+      mysql: { condition: service_healthy }
     networks: [pedidos360-apps]
 
   rabbit-admin-service:
@@ -108,3 +138,6 @@ services:
 networks:
   pedidos360-apps:
     name: pedidos360-apps
+
+volumes:
+  pedidos360-mysql-data:

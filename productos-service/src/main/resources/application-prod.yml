@@ -28,9 +28,9 @@ spring:
   application:
     name: productos-service
 
-  # Base de datos cloud: AWS RDS (MySQL)
+  # MySQL privado; Compose usa DB_SSL_MODE=DISABLED solo dentro del mismo host.
   datasource:
-    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:productosdb}?useSSL=true&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:productosdb}?sslMode=${DB_SSL_MODE:REQUIRED}&serverTimezone=UTC&allowPublicKeyRetrieval=true
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: ${DB_USER}
     password: ${DB_PASSWORD}
