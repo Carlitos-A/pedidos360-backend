@@ -19,11 +19,11 @@ para Amazon MSK usar `prod,msk`. En `prod`, definir `KAFKA_BOOTSTRAP_SERVERS`.
 
 | Variable de backend | Uso |
 |---|---|
-| `ENTRA_TENANT_ID` | Issuer JWT y directorio de clientes |
+| `ENTRA_TENANT_ID` | Issuer JWT y tenant permitido para clientes registrados |
 | `ENTRA_API_AUDIENCE` | Valor exacto esperado en `aud` (por ejemplo `api://<id>`) |
 | `FRONT_URL` | Origen de la SPA para CORS, sin ruta de repositorio |
 | `KAFKA_BOOTSTRAP_SERVERS` | Brokers anunciados y alcanzables desde el proceso Java |
-| `INTERNAL_SERVICE_KEY`, `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `GRAPH_CLIENT_SECRET` | Secretos suministrados fuera de Git |
+| `INTERNAL_SERVICE_KEY`, `DB_PASSWORD`, `RABBITMQ_PASSWORD` | Secretos suministrados fuera de Git |
 
 Los valores de Entra antiguos permanecen como valores de desarrollo en
 `application.yml`; los perfiles `prod` requieren los identificadores del nuevo
@@ -201,7 +201,7 @@ mismas variables de conexión. Los scripts no publican endpoints.
 | --- | --- | ---: | ---: | ---: | --- |
 | `pedidos360.orders.events.v1` | Snapshots de negocio para ventas, estados y productos | 3 | 3 | 7 días | `pedidos360-report` |
 | `pedidos360.audit.v1` | Eventos mínimos de trazabilidad para el timeline | 3 | 3 | 30 días | `pedidos360-audit` |
-| `pedidos360.login.v1` | Logins verificados de Entra, fuente auxiliar | 3 | 3 | 7 días | `pedidos360-audit` |
+| `pedidos360.login.v1` | Reservado para una futura fuente confiable de logins | 3 | 3 | 7 días | `pedidos360-audit` |
 | `pedidos360.report.dlt.v1` | Eventos de reporte inválidos | 3 | 3 | 14 días | inspección manual |
 | `pedidos360.audit.dlt.v1` | Eventos de auditoría inválidos | 3 | 3 | 14 días | inspección manual |
 
@@ -272,11 +272,10 @@ UTC y actor; cambios de estado incluyen `previousStatus` y `status`. No se
 incluyen nombre, detalle ni ítems del pedido. El consumidor usa `eventId` único
 para deduplicar. Los mensajes inválidos se confirman solo tras publicarse en
 `pedidos360.audit.dlt.v1`; fallos de base o de DLT se reintentan sin saltar el
-offset. `pedidos360.login.v1` está reservado para inicios de sesión de Entra.
-Un adaptador opcional de `audit-service` consulta Microsoft Graph por inicios
-interactivos exitosos de la SPA y publica `USER_LOGIN` con el ID de registro de
-Entra como clave estable. Conserva un cursor en MySQL, reconsulta una ventana
-solapada y no lo avanza si falla la publicación. Angular no emite login.
+offset. `pedidos360.login.v1` queda reservado: no hay productor de
+`USER_LOGIN`, ya que el frontend no puede acreditar ante el servidor un
+inicio de sesión exitoso. El consumidor de auditoría conserva la compatibilidad
+con ese tipo para una futura fuente confiable.
 
 Variables compartidas: `KAFKA_BOOTSTRAP_SERVERS`, `AUDIT_KAFKA_ENABLED` y
 `AUDIT_KAFKA_TOPIC`. `audit-service` acepta `AUDIT_LOGIN_TOPIC`,
@@ -290,14 +289,6 @@ credenciales provienen del rol de ejecución AWS. Los clientes de pedidos y
 productos necesitan escribir en el tópico de auditoría; audit-service necesita
 leer los tópicos de auditoría y login con su grupo, y escribir en DLT. El
 frontend nunca se conecta a Kafka.
-
-El adaptador de login permanece desactivado (`ENTRA_SIGNINS_ENABLED=false`).
-Para activarlo se requieren `ENTRA_TENANT_ID`, `ENTRA_SPA_APP_ID`,
-`GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` y el permiso de aplicación de Microsoft
-Graph `AuditLog.Read.All` con consentimiento administrativo. Microsoft Graph
-exige licencia Entra ID P1 o P2 para descargar sign-ins. Se pueden ajustar
-`ENTRA_INITIAL_LOOKBACK_HOURS` y `ENTRA_SIGNIN_OVERLAP_HOURS` (24 h por defecto);
-la disponibilidad histórica depende de la retención de los registros Entra.
 
 Antes del corte de ruta, aplicar
 [`2026-11-20-product-audit-identity.sql`](productos-service/db/migrations/2026-11-20-product-audit-identity.sql)
@@ -386,25 +377,29 @@ permitía crear registros sin propietario ni validación; `GET /pedidos` queda
 temporalmente disponible solo para Admin.
 
 La lista de Cliente aplica propietario, búsqueda, estado y fechas en SQL antes
-de paginar y contar. Admin selecciona el destinatario desde
-`GET /api/customers?q=...`; `POST /api/orders` vuelve a comprobar en Microsoft
-Graph que la cuenta existe, está habilitada y tiene asignado directamente el
-rol Cliente de esta API. PUT no puede cambiar propietario. Para cambiarlo,
-Admin usa `PATCH /api/orders/{id}/owner` con `customerId` y
-`customerTenantId`; la operación se audita. Debes enrutar también
-`/api/customers` hacia `pedidos-service:8081` en API Gateway.
+de paginar y contar. Al abrir una ruta protegida de la SPA, un Cliente se
+registra mediante `POST /api/customers/me` con su access token válido. El
+servidor toma `oid`, `tid`, rol, nombre y correo **solo del JWT**, y persiste
+la cuenta en `registered_customer`. No acepta una identidad enviada en el
+cuerpo. Admin busca entre los clientes registrados con
+`GET /api/customers?q=...`; `POST /api/orders` y la reasignación vuelven a
+comprobar ese registro. Un Cliente debe haber iniciado sesión al menos una
+vez para aparecer en la búsqueda. PUT no cambia propietario; Admin usa
+`PATCH /api/orders/{id}/owner` y la operación se audita.
 
-Para activar el directorio configura `ENTRA_TENANT_ID`, `GRAPH_CLIENT_ID`,
-`GRAPH_CLIENT_SECRET`, `API_SERVICE_PRINCIPAL_ID` y `CUSTOMER_ROLE_ID` en la
-instancia. La aplicación confidencial de Graph necesita permiso de aplicación
-`Directory.Read.All` con consentimiento de administrador para leer usuarios y
-asignaciones directas de roles. Si falta configuración o Graph falla, la
-búsqueda y las asignaciones responden 503. No guardes el secreto en Git.
+En API Gateway, enrutar `POST /api/customers/me` y
+`GET /api/customers` a `pedidos-service:8081`. El POST de registro usa el
+scope `pedidos.read`, aunque sea POST; es una actualización de la identidad
+propia, no una escritura administrativa. El servicio exige el rol `Cliente`
+y rechaza un token que también tenga `Admin`. No se necesita una tercera App
+Registration ni consentimiento administrativo para el directorio. El registro
+refleja el último token observado; sin una consulta de directorio externa no
+puede detectar de inmediato una baja o revocación posterior del rol.
 
 La migración histórica es explícita: Admin envía a
 `POST /api/orders/ownership-migration` una lista de hasta 100 objetos
 `{orderId,customerId,customerTenantId}` construida con una correspondencia
-comprobada. El servidor vuelve a verificar cada cuenta en Graph, exige que
+comprobada. El servidor exige que la cuenta esté registrada por un JWT Cliente, y que
 el pedido aún no tenga propietario, guarda la correspondencia en
 `verified_owner_mapping` con actor y fecha, y registra auditoría. Un error
 revierte el lote completo. Nunca se asigna por coincidencia del nombre.
@@ -472,9 +467,9 @@ mvnw.cmd spring-boot:run
 - Valida audience (`aud`) con `AudienceValidator`.
 - Autorización por rol: claim `roles` → autoridades `APPROLE_*`.
   - `GET` → Admin o Cliente
-  - `POST` → solo Admin
+  - `POST /api/customers/me` → Cliente; las demás escrituras → Admin
 - Sin token → 401 · sin permiso → 403.
-- CORS habilitado para `http://localhost:4200` en desarrollo; en producción se configura con `FRONT_URL` (el origen de CloudFront).
+- CORS habilitado para `http://localhost:4200` en desarrollo; en producción se configura con `FRONT_URL` (el origen de GitHub Pages).
 
 ### CORS, rutas y scope de escritura
 
@@ -487,6 +482,7 @@ con `-ApiId <nuevo-id> -AllowedOrigins <origen-spa>` para añadir PUT/PATCH y
 los dos headers.
 
 Después, revisa las rutas de la nueva HTTP API: POST
+`/api/customers/me`, GET `/api/customers`, POST
 `/api/orders`, PUT `/api/orders/{id}`, PATCH `/api/orders/{id}/status`, PATCH
 `/api/orders/{id}/owner`, POST `/api/orders/ownership-migration`, POST
 `/api/products`, PUT `/api/products/{id}` y PATCH
@@ -502,8 +498,9 @@ escritura del gateway y conserva `pedidos.read` en GET. API Gateway acepta una
 coincidencia con **cualquiera** de los scopes de una ruta; incluir ambos en
 una ruta de escritura permitiría entrar con solo lectura. El perfil `prod`
 activa por defecto `REQUIRE_WRITE_SCOPE=true` en pedidos y productos. Así,
-cada POST/PUT/PATCH exige simultáneamente rol `Admin` y `scp` con
-`pedidos.write`.
+cada escritura administrativa exige simultáneamente rol `Admin` y `scp` con
+`pedidos.write`. `POST /api/customers/me` exige `Cliente` y debe usar
+`pedidos.read` en el gateway.
 Angular pide `pedidos.read` para iniciar sesión y GET, y `pedidos.write` solo
 para métodos de escritura. Un Cliente podría recibir el scope delegado de la
 SPA, pero su rol sigue bloqueando las escrituras.

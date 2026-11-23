@@ -1,7 +1,8 @@
 # Código preparado para un despliegue AWS nuevo
 
 Este documento describe el orden de arranque del código. La VPC, RDS, EC2,
-Security Groups, ALB, API Gateway, CloudFront y Entra se crean en AWS después.
+Security Groups, ALB, API Gateway y Entra se configuran después. La SPA actual
+se publica en GitHub Pages.
 No se deben aplicar los SQL históricos fechados a estas bases nuevas.
 
 ## 1. MySQL
@@ -15,12 +16,14 @@ La primera ejecución necesita permisos DDL para que Flyway cree sus tablas
 y `flyway_schema_history`; los reinicios siguientes no repiten V1.
 Conservar las contraseñas fuera de Git.
 
-Cada servicio ejecuta automáticamente su
-`src/main/resources/db/migration/V1__initial_schema.sql` al iniciar con
+Cada servicio ejecuta automáticamente su migración inicial al iniciar con
 `prod`. Luego Hibernate valida las tablas. Pedidos y productos también usan
 `ddl-auto: validate` en producción. En desarrollo H2 mantiene
 `ddl-auto: update` y Flyway deshabilitado. No habilitar
 `spring.flyway.baseline-on-migrate` automáticamente sobre datos existentes.
+`pedidos-service` ejecuta además `V2__registered_customers.sql` para crear el
+registro local de clientes. `audit-service` elimina la tabla de cursor del
+adaptador de Graph retirado mediante su propia migración V2.
 
 Los SQL de `*/db/migrations/2026-*.sql` son **históricos**. Si se migra una
 base antigua, respaldarla, revisar su esquema real y aplicar los cambios
@@ -89,18 +92,20 @@ HTTP 200 sin JWT ni `X-Internal-Key` si el proceso Java responde.
 la vista Admin. El liveness depende del aislamiento de red del Security Group,
 no de una clave HTTP.
 
-En el gateway, dirigir `/api/orders/*` y `/api/health` a 8081,
+En el gateway, dirigir `/api/orders/*`, `/api/health`,
+`GET /api/customers` y `POST /api/customers/me` a 8081,
 `/api/products/*` a 8082, `/api/reports/*` a 8085,
 `/api/audit/*` a 8084. Los admin en 8083/8086 quedan internos; no
 agregar rutas públicas para ellos. El gateway debe validar JWT y CORS, y
-los servicios conservan su control por rol y scope.
+los servicios conservan su control por rol y scope. El registro propio del
+Cliente requiere `pedidos.read`; las escrituras administrativas requieren
+`pedidos.write`. No se configura Microsoft Graph para este flujo.
 
 ## 4. Frontend
 
-El workflow del repositorio frontend compila Angular con `--base-href /`,
-sube `dist/pedidos360-front/browser` al bucket privado de S3 y crea una
-invalidación CloudFront. Usa OIDC y variables del repositorio; no necesita
-una access key de AWS. Configurar en la distribución OAC, objeto raíz
-`index.html` y respuestas 403/404 → `/index.html` con 200 para rutas
-internas de la SPA. `SPA_BASE_URL` y `FRONT_URL` deben apuntar al origen
-HTTPS real de CloudFront (o el dominio propio), sin ruta adicional.
+La SPA actual vive en GitHub Pages en
+`https://carlitos-a.github.io/pedidos360-frontend/`. Compilar Angular con
+`SPA_BASE_URL` igual a esa URL, incluida la ruta del repositorio. En el
+backend, `FRONT_URL=https://carlitos-a.github.io` (solo el origen) para CORS.
+Mantener los redirect URI de Entra en `/auth/callback` y `/login` bajo la ruta
+del repositorio; configurar el gateway con el mismo origen permitido.

@@ -32,10 +32,6 @@ services:
       PRODUCTS_HEALTH_URL: http://productos-service:8082/internal/health
       REPORT_SERVICE_URL: http://report-service:8085/internal/health
       AUDIT_SERVICE_URL: http://audit-service:8084/internal/health
-      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
-      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
-      API_SERVICE_PRINCIPAL_ID: ${API_SERVICE_PRINCIPAL_ID:-}
-      CUSTOMER_ROLE_ID: ${CUSTOMER_ROLE_ID:-}
       REQUIRE_WRITE_SCOPE: ${REQUIRE_WRITE_SCOPE:-true}
       AUDIT_KAFKA_ENABLED: "true"
       REPORT_KAFKA_ENABLED: "true"
@@ -85,10 +81,6 @@ services:
       DB_PASSWORD: ${AUDIT_DB_PASSWORD:?Set AUDIT_DB_PASSWORD}
       AUDIT_KAFKA_ENABLED: "true"
       AUDIT_DLT_MONITOR_ENABLED: "true"
-      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
-      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
-      ENTRA_SIGNINS_ENABLED: ${ENTRA_SIGNINS_ENABLED:-false}
-      ENTRA_SPA_APP_ID: ${ENTRA_SPA_APP_ID:-}
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8084:8084"
     networks: [pedidos360-apps]

@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from pathlib import Path
 
 
@@ -85,6 +86,18 @@ def main():
           ".".join(admin.split(".")[:2] + [altered]))
 
     admin_orders, _ = check("Admin pedidos", {200}, "/api/orders?page=0&pageSize=100", admin)
+    registered, _ = check("Cliente registro propio", {200}, "/api/customers/me", client, "POST")
+    if registered and (registered.get("id") != oid or registered.get("tenantId") != tid):
+        results.append({"check": "identidad registrada desde JWT", "result": "FAIL"})
+    check("Admin no puede registrarse como Cliente", {403}, "/api/customers/me", admin, "POST")
+    search = (registered or {}).get("name") or client_claims.get("name") or \
+        client_claims.get("preferred_username") or oid
+    if len(search.strip()) < 2:
+        search = oid
+    found, _ = check("Admin busca clientes registrados", {200},
+                     "/api/customers?q=" + urllib.parse.quote(search[:40]), admin)
+    if isinstance(found, list) and not any(item.get("id") == oid for item in found):
+        results.append({"check": "Cliente aparece en directorio", "result": "FAIL"})
     for path in ("/api/products?page=0&pageSize=20", "/api/reports/kpis?days=30",
                  "/api/reports/sales?days=365", "/api/reports/lead-time?days=365",
                  "/api/reports/top-products?days=365", "/api/audit/events?page=0&pageSize=20",
