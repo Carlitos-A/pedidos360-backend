@@ -4,17 +4,19 @@ Microservicios Spring Boot del sistema Pedidos360 (EP1 · DSY1107).
 
 Para un despliegue nuevo de las seis APIs y las cuatro bases, seguir
 [`docs/aws-code-deploy.md`](docs/aws-code-deploy.md). Ese flujo usa Flyway
-en producción y `ddl-auto: validate`; los SQL fechados de `db/migrations`
+en producción y `ddl-auto: validate`. Por la restricción IAM del laboratorio,
+MySQL 8.4 corre en la EC2 Apps mediante Compose, con volumen persistente y
+usuarios separados; no se crea RDS. Los SQL fechados de `db/migrations`
 son únicamente para actualizar instalaciones históricas.
 
 ## Perfiles para el nuevo despliegue
 
-`prod` configura RDS, Entra y CORS con variables obligatorias; no selecciona
+`prod` configura MySQL, Entra y CORS con variables obligatorias; no selecciona
 el transporte Kafka. Activar **exactamente uno** de los perfiles `msk` o
 `kafka-compose` en los cinco servicios que usan Kafka (`pedidos`, `productos`,
 `audit`, `report`, `kafka-admin`). `msk` usa `SASL_SSL` y `AWS_MSK_IAM`;
 `kafka-compose` usa `PLAINTEXT` y tres brokers. Para desarrollo local basta
-`kafka-compose`; para RDS junto al clúster Compose usar `prod,kafka-compose`;
+`kafka-compose`; para MySQL junto al clúster Compose usar `prod,kafka-compose`;
 para Amazon MSK usar `prod,msk`. En `prod`, definir `KAFKA_BOOTSTRAP_SERVERS`.
 
 | Variable de backend | Uso |
@@ -23,7 +25,7 @@ para Amazon MSK usar `prod,msk`. En `prod`, definir `KAFKA_BOOTSTRAP_SERVERS`.
 | `ENTRA_API_AUDIENCE` | Valor exacto esperado en `aud` (por ejemplo `api://<id>`) |
 | `FRONT_URL` | Origen de la SPA para CORS, sin ruta de repositorio |
 | `KAFKA_BOOTSTRAP_SERVERS` | Brokers anunciados y alcanzables desde el proceso Java |
-| `INTERNAL_SERVICE_KEY`, `DB_PASSWORD`, `RABBITMQ_PASSWORD` | Secretos suministrados fuera de Git |
+| `INTERNAL_SERVICE_KEY`, `MYSQL_ROOT_PASSWORD`, contraseñas `*_DB_PASSWORD`, `RABBITMQ_PASSWORD` | Secretos suministrados fuera de Git |
 
 Los valores de Entra antiguos permanecen como valores de desarrollo en
 `application.yml`; los perfiles `prod` requieren los identificadores del nuevo
@@ -507,7 +509,9 @@ SPA, pero su rol sigue bloqueando las escrituras.
 
 ## Base de datos
 
-RDS MySQL en producción y H2 en memoria para desarrollo, con credenciales por variables de entorno.
+MySQL 8.4 en el Compose de la EC2 Apps para el laboratorio y H2 en memoria
+para desarrollo, con credenciales por variables de entorno. El puerto 3306 no
+se publica; las cuatro APIs usan el nombre interno `mysql`.
 
 ## EP4: mensajería asíncrona con RabbitMQ
 

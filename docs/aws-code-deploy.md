@@ -1,20 +1,34 @@
 # Código preparado para un despliegue AWS nuevo
 
-Este documento describe el orden de arranque del código. La VPC, RDS, EC2,
+Este documento describe el orden de arranque del código. La VPC, EC2,
 Security Groups, ALB, API Gateway y Entra se configuran después. La SPA actual
 se publica en GitHub Pages.
 No se deben aplicar los SQL históricos fechados a estas bases nuevas.
 
-## 1. MySQL
+## 1. MySQL en la EC2 Apps
 
-Crear la instancia MySQL 8 de RDS sin acceso público. Ejecutar
-[`db/001_create_databases.sql`](../db/001_create_databases.sql) como
-administrador. Crear cuatro usuarios, cada uno con acceso **solo a su base**:
+El rol del laboratorio no permite `rds:CreateDBInstance`. El Compose de
+aplicaciones levanta MySQL 8.4 en la misma EC2, en la red Docker
+`pedidos360-apps`, sin publicar el puerto 3306 en la máquina ni en Internet.
+El volumen `pedidos360-mysql-data` conserva los datos al reiniciar el
+contenedor. En el primer arranque,
+[`db/001_create_databases.sql`](../db/001_create_databases.sql) crea cuatro
+bases y [`db/002_create_users.sh`](../db/002_create_users.sh) crea un usuario
+por base:
 `pedidos_app` a `pedidosdb`, `productos_app` a `productosdb`,
 `report_app` a `reportdb` y `audit_app` a `auditdb`.
-La primera ejecución necesita permisos DDL para que Flyway cree sus tablas
-y `flyway_schema_history`; los reinicios siguientes no repiten V1.
-Conservar las contraseñas fuera de Git.
+Las contraseñas se toman de `.env.apps`, fuera de Git, y deben tener al menos
+16 caracteres alfanuméricos o `_@%+=-`. El usuario de cada servicio tiene
+permisos DDL solamente en su base para que Flyway cree sus tablas. Los
+scripts de inicialización se ejecutan **solo con un volumen vacío**; cambiar
+las contraseñas del archivo después no cambia las cuentas existentes.
+
+Los servicios usan `DB_HOST=mysql` y `DB_SSL_MODE=DISABLED` en esta red Docker
+del mismo host. El perfil `prod` mantiene `REQUIRED` como valor predeterminado
+para una base externa. No agregues una regla de entrada 3306 a `sg-apps`.
+Haz una copia periódica del volumen o un volcado lógico; una falla de la EC2
+puede perder la única copia. Esta variante no acredita el requisito RDS de
+la rúbrica si se evalúa literalmente.
 
 Cada servicio ejecuta automáticamente su migración inicial al iniciar con
 `prod`. Luego Hibernate valida las tablas. Pedidos y productos también usan
@@ -67,17 +81,18 @@ la caída de ese host sigue siendo una caída total. Para MSK, usar
 
 ## 3. Aplicaciones
 
-En la EC2 privada de aplicaciones:
+En la EC2 de aplicaciones:
 
 ```bash
 cp .env.apps.example .env.apps
 # Reemplazar todos los valores de ejemplo; APP_BIND_ADDRESS = IP privada de esta EC2.
 chmod 600 .env.apps
 docker compose --env-file .env.apps -f docker-compose.apps.yml config --quiet
+docker compose --env-file .env.apps -f docker-compose.apps.yml up -d --wait mysql
 docker compose --env-file .env.apps -f docker-compose.apps.yml up -d --build
 ```
 
-El Compose levanta pedidos 8081, productos 8082, rabbit-admin 8083, audit
+El Compose levanta MySQL y pedidos 8081, productos 8082, rabbit-admin 8083, audit
 8084, report 8085 y kafka-admin 8086. Los servicios Kafka usan
 `prod,kafka-compose`; rabbit-admin usa `prod`. Los puertos se vinculan a
 `APP_BIND_ADDRESS`; en AWS asignar la IP privada de la EC2. El Security
