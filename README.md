@@ -22,7 +22,7 @@ para Amazon MSK usar `prod,msk`. En `prod`, definir `KAFKA_BOOTSTRAP_SERVERS`.
 | Variable de backend | Uso |
 |---|---|
 | `ENTRA_TENANT_ID` | Issuer JWT y tenant permitido para clientes registrados |
-| `ENTRA_API_AUDIENCE` | Valor exacto esperado en `aud` (por ejemplo `api://<id>`) |
+| `ENTRA_API_AUDIENCE` | Valor exacto del claim `aud` del access token emitido para la API (por ejemplo, el GUID de la App Registration). Es distinto del scope solicitado por la SPA, que puede usar `api://<id>/pedidos.read`. |
 | `FRONT_URL` | Origen de la SPA para CORS, sin ruta de repositorio |
 | `KAFKA_BOOTSTRAP_SERVERS` | Brokers anunciados y alcanzables desde el proceso Java |
 | `INTERNAL_SERVICE_KEY`, `MYSQL_ROOT_PASSWORD`, contraseñas `*_DB_PASSWORD`, `RABBITMQ_PASSWORD` | Secretos suministrados fuera de Git |
