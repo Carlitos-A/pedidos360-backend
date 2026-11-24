@@ -2,6 +2,7 @@ package com.pedidos360.rabbitadmin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pedidos360.rabbitadmin.service.RabbitAdminService;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +19,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class RabbitAdminOpenApiTest {
     @Autowired MockMvc mvc;
+    @Autowired RabbitAdmin rabbitAdmin;
+
+    @Test void configuraAdministradorDeRabbit() {
+        assertNotNull(rabbitAdmin);
+    }
 
     @Test void livenessPermiteHealthCheckSinTokenNiClave() throws Exception {
         mvc.perform(get("/internal/live"))
