@@ -63,6 +63,8 @@ spring:
 springdoc:
   paths-to-match: /api/**
 app:
+  rabbit-demo:
+    enabled: ${RABBIT_DEMO_ENABLED:false}
   optional-work:
     enabled: ${OPTIONAL_WORK_ENABLED:false}
     retry-attempts: ${OPTIONAL_WORK_RETRY_ATTEMPTS:3}

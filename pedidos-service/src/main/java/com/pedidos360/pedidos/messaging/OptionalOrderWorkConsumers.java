@@ -31,6 +31,12 @@ public class OptionalOrderWorkConsumers {
         process("notification", message, channel, service::notifyCustomer);
     }
 
+    @RabbitListener(queues = "pedidos360.demo.notification",
+                    autoStartup = "${app.rabbit-demo.enabled:false}")
+    public void rejectDemoMessage(Message message, Channel channel) throws IOException {
+        process("demo notification", message, channel, service::notifyCustomer);
+    }
+
     @RabbitListener(queues = "${pedidos360.messaging.queues.ticket}",
                     autoStartup = "${app.optional-work.enabled:true}")
     public void issueTicket(Message message, Channel channel) throws IOException {
