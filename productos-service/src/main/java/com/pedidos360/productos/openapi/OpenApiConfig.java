@@ -19,7 +19,7 @@ public class OpenApiConfig {
             new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT"));
         SecurityRequirement required = new SecurityRequirement().addList("bearerAuth");
         return new OpenAPI().info(new Info().title("Pedidos360 Productos").version("1.0")
-            .description("Catálogo y stock. Admin escribe; Cliente consulta productos asignados.")).components(components).addSecurityItem(required);
+            .description("Catálogo compartido y stock. Admin escribe; Cliente consulta.")).components(components).addSecurityItem(required);
     }
 
     @Bean

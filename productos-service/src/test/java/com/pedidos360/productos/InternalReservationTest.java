@@ -45,7 +45,7 @@ class InternalReservationTest {
         var controller = new com.pedidos360.productos.controller.ProductApiController(products,
             org.mockito.Mockito.mock(com.pedidos360.productos.messaging.ProductAuditPublisher.class));
         var input = new com.pedidos360.productos.controller.ProductApiController.ProductInput(
-            "A", "B", new BigDecimal("100.5"), 1, "owner", "tenant");
+            "A", "B", new BigDecimal("100.5"), 1);
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
             () -> controller.create(input, null)).getStatusCode());
     }
@@ -53,7 +53,7 @@ class InternalReservationTest {
     @Test @Transactional void reservaEsIdempotenteYAjustaDeltas() {
         Producto product = new Producto();
         product.setNombre("Producto"); product.setCategoria("Prueba"); product.setPriceClp(100L);
-        product.setStock(5); product.setCustomerId("owner"); product.setCustomerTenantId("tenant");
+        product.setStock(5);
         products.saveAndFlush(product);
         var two = request(product.getId(), 2, 100L);
         assertEquals(200L, controller.reserve("order-123", "test-key", two).total());
@@ -66,7 +66,7 @@ class InternalReservationTest {
         assertEquals(5, product.getStock());
     }
 
-    @Test @Transactional void precioOPropietarioIncorrectoNoDescuentan() {
+    @Test @Transactional void precioIncorrectoNoDescuentaYCatalogoSirveAOtrosClientes() {
         Producto product = new Producto();
         product.setNombre("Producto"); product.setCategoria("Prueba"); product.setPriceClp(100L);
         product.setStock(5); product.setCustomerId("owner"); product.setCustomerTenantId("tenant");
@@ -75,11 +75,13 @@ class InternalReservationTest {
             () -> controller.reserve("order-456", "test-key", request(product.getId(), 2, 99L)));
         assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
         assertEquals(5, product.getStock());
-        var wrongOwner = new InternalReservationController.ReserveInput("other", "tenant", true,
+        var anotherCustomer = new InternalReservationController.ReserveInput("other", "tenant", true,
             List.of(new InternalReservationController.Line(product.getId(), 1, 100L)));
-        assertThrows(ResponseStatusException.class,
-            () -> controller.reserve("order-789", "test-key", wrongOwner));
-        assertEquals(5, product.getStock());
+        assertEquals(100L, controller.reserve("order-789", "test-key", anotherCustomer).total());
+        assertEquals(4, product.getStock());
+        assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
+            () -> controller.reserve("order-789", "test-key", request(product.getId(), 1, 100L))).getStatusCode());
+        assertEquals(4, product.getStock());
     }
 
     private InternalReservationController.ReserveInput request(Long id, int quantity, Long price) {

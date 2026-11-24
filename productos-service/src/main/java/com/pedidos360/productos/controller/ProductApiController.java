@@ -18,31 +18,23 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/products")
-@Tag(name = "Productos", description = "Catálogo asignado a Cliente; escritura exclusiva de Admin")
+@Tag(name = "Productos", description = "Catálogo compartido; escritura exclusiva de Admin")
 public class ProductApiController {
     private final ProductoRepository repository;
     private final ProductAuditPublisher audit;
     public ProductApiController(ProductoRepository repository, ProductAuditPublisher audit) {
         this.repository = repository; this.audit = audit;
     }
-    @Schema(description = "Producto con precio CLP entero, stock no negativo y propietario")
-    public record ProductInput(String name, String category, BigDecimal price, Integer stock,
-                               String customerId, String customerTenantId) {}
+    @Schema(description = "Producto del catálogo con precio CLP entero y stock no negativo")
+    public record ProductInput(String name, String category, BigDecimal price, Integer stock) {}
     @Schema(description = "Ajuste atómico de stock; delta positivo o negativo")
     public record StockInput(Integer delta) {}
-    public record ProductView(String id, String name, String category, Long price, Integer stock,
-                              String customerId, String customerTenantId) {}
+    public record ProductView(String id, String name, String category, Long price, Integer stock) {}
 
     @GetMapping
-    @Operation(summary = "Lista productos", description = "Cliente solo recibe productos asignados a su oid y tid")
+    @Operation(summary = "Lista el catálogo compartido", description = "Admin y Cliente pueden consultar los productos")
     public List<ProductView> list(@AuthenticationPrincipal Jwt jwt) {
-        if (jwt.getClaimAsStringList("roles") != null && jwt.getClaimAsStringList("roles").contains("Admin"))
-            return repository.findAll().stream().map(this::view).toList();
-        String oid = jwt.getClaimAsString("oid");
-        String tid = jwt.getClaimAsString("tid");
-        if (oid == null || oid.isBlank() || tid == null || tid.isBlank())
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identidad de Cliente incompleta");
-        return repository.findByCustomerIdAndCustomerTenantId(oid, tid).stream().map(this::view).toList();
+        return repository.findAll().stream().map(this::view).toList();
     }
 
     @PostMapping
@@ -85,16 +77,14 @@ public class ProductApiController {
         return view(p);
     }
     private Producto find(Long id) { return repository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND)); }
-    private ProductView view(Producto p) { return new ProductView(String.valueOf(p.getId()), p.getNombre(), p.getCategoria(), p.getPriceClp(), p.getStock(), p.getCustomerId(), p.getCustomerTenantId()); }
+    private ProductView view(Producto p) { return new ProductView(String.valueOf(p.getId()), p.getNombre(), p.getCategoria(), p.getPriceClp(), p.getStock()); }
     private void apply(Producto p, ProductInput i) {
         p.setNombre(i.name().strip()); p.setCategoria(i.category().strip()); p.setPriceClp(i.price().longValueExact()); p.setStock(i.stock());
-        p.setCustomerId(i.customerId().strip()); p.setCustomerTenantId(i.customerTenantId().strip());
     }
     private void validate(ProductInput i) {
         if (i == null || i.name() == null || i.name().isBlank() || i.name().length() > 200
             || i.category() == null || i.category().isBlank() || i.category().length() > 200
-            || i.price() == null || !integerClp(i.price()) || i.stock() == null || i.stock() < 0
-            || i.customerId() == null || i.customerId().isBlank() || i.customerTenantId() == null || i.customerTenantId().isBlank())
+            || i.price() == null || !integerClp(i.price()) || i.stock() == null || i.stock() < 0)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
     }
     private boolean integerClp(BigDecimal price) {

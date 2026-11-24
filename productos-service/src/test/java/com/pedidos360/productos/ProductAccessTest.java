@@ -15,7 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProductAccessTest {
     @Autowired MockMvc mvc;
 
-    @Test void clienteSoloPuedeLeerApiFiltrada() throws Exception {
+    @Test void clientePuedeLeerCatalogoPeroNoRutaLegada() throws Exception {
         var cliente = new SimpleGrantedAuthority("APPROLE_Cliente");
         mvc.perform(get("/api/products").with(jwt().jwt(token -> token.claim("roles", java.util.List.of("Cliente"))
             .claim("oid", "customer-1").claim("tid", "tenant-1")).authorities(cliente))).andExpect(status().isOk());

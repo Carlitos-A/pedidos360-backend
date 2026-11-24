@@ -407,13 +407,17 @@ el pedido aún no tenga propietario, guarda la correspondencia en
 revierte el lote completo. Nunca se asigna por coincidencia del nombre.
 
 `productos-service` expone `GET/POST /api/products`, `PUT /api/products/{id}`
-y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. Cada producto
-guarda `customerId` y `customerTenantId`; Admin asigna ambos al crear o editar.
-GET `/api/products` devuelve todos para Admin y solo los que coinciden con
-`oid` y `tid` del access token para Cliente. Los productos antiguos sin dueño
-quedan visibles solo para Admin hasta una asignación verificada. El GET legado
-`/productos` requiere Admin y el POST legado se deshabilitó para impedir
-productos nuevos sin dueño. Ambos servicios admiten `PATCH` en CORS.
+y `PATCH /api/products/{id}/stock` con cuerpo `{ "delta": -1 }`. El catálogo
+es compartido: Admin crea productos con nombre, categoría, precio CLP y stock,
+sin asignarlos a una persona. GET `/api/products` devuelve el catálogo a Admin
+y Cliente; solo Admin puede escribir. Los pedidos siguen asociados a un Cliente
+registrado y pueden reservar productos del catálogo común. Las reservas se
+identifican por pedido y propietario para evitar reusar una reserva de otro
+Cliente. Las columnas antiguas de propietario de producto se conservan por
+compatibilidad con la base existente, pero ya no controlan visibilidad ni
+reservas: los productos anteriores también pasan a ser compartidos. El GET
+legado `/productos` requiere Admin y el POST legado sigue deshabilitado. Ambos
+servicios admiten `PATCH` en CORS.
 
 Antes de desplegar sobre MySQL existente, preparar migración de esquema para
 propietario, `version`, ítems, historial y stock. Las filas existentes no deben

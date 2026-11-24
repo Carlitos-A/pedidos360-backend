@@ -79,9 +79,6 @@ public class InternalReservationController {
         ids.addAll(desired.keySet());
         for (Long id : ids) {
             Producto p = products.lockById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Producto inexistente"));
-            if (!Objects.equals(p.getCustomerId(), input.customerId())
-                || !Objects.equals(p.getCustomerTenantId(), input.customerTenantId()))
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Producto de otro cliente");
             locked.put(id, p);
         }
         List<QuotedLine> quoted = new ArrayList<>();
